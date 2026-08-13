@@ -320,18 +320,18 @@
   <section class="block">
     <h2>貼上訊息，自動解析建檔</h2>
     <textarea id="pasteBox" placeholder="例如：
-週三 14:30-15:30、16:30-18:00
-每週五 14:30-15:30
-以上時段可以在A校觀課LZ～
-也支援：每週四下午五點到六點翠屏校上課"></textarea>
+老師您好，
+B4. Amelia
+👉 請假日期：8/10
+👉 補考課日期：8/13、8/17
+補考課安排於課後15:30-16:00進行
+謝謝老師😊"></textarea>
     <div class="row">
       <button class="primary" id="parseBtn">解析文字</button>
       <button class="ghost" id="clearPasteBtn">清空</button>
     </div>
     <div class="hint">
-      規則：只寫「週三／週五」等星期幾 → 抓最近（含本週）的日期；文字中若出現「下週／下周」或明確日期（如 8/17、115/08/17）→ 從下週起算或直接採用該日期。
-      若寫「每週」開頭（如「每週四…」）會自動勾選「每週重複」，預設重複到「起始日期所在那一年」的12/31（跨年的行程要分開設定），也可以在下方欄位自行改成更早的結束日。
-      解析後可在下方逐筆修改，確認無誤再加入行事曆。注意：系統解析可能出現標題文字錯誤。
+      規則：支援各式日期（西元/民國 115/08/13、8/13、8/13與8/17、國字八月十三等）。若含有「請假」、「補考課」等主題關鍵字，會自動設為行程標題！
     </div>
 
     <div id="previewWrap" style="display:none;">
@@ -428,7 +428,6 @@
 </div>
 
 <div class="modal-bg" id="deleteModal">
-
   <div class="modal">
     <h3>刪除帳號</h3>
     <div class="warn">
@@ -479,6 +478,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+let currentUser = null;
+let events = [];
 
 /* ---------------- auth screen wiring ---------------- */
 const authScreen = document.getElementById("authScreen");
@@ -562,21 +564,16 @@ deleteForm.addEventListener("submit", async (e)=>{
   deleteConfirmBtn.disabled = true;
   deleteConfirmBtn.textContent = "刪除中…";
   try{
-    // 重新驗證身份，避免不是本人操作
     const cred = EmailAuthProvider.credential(currentUser.email, delPassword.value);
     await reauthenticateWithCredential(currentUser, cred);
 
-    // 先刪掉這個帳號名下所有行程資料
     const colRef = collection(db,"users",currentUser.uid,"events");
     const snap = await getDocs(colRef);
     const delJobs = snap.docs.map(d => deleteDoc(doc(db,"users",currentUser.uid,"events",d.id)));
     await Promise.all(delJobs);
 
-    // 再刪除登入帳號本身
     await deleteUser(currentUser);
-
     deleteModal.classList.remove("open");
-    // onAuthStateChanged 會自動偵測到已登出並切回登入畫面
   }catch(err){
     deleteErr.textContent = friendlyDeleteError(err.code);
   }finally{
@@ -720,13 +717,15 @@ function startOfWeekMon(d){
 }
 function addDays(d,n){ const nd=new Date(d); nd.setDate(nd.getDate()+n); return nd; }
 function stripTime(d){ const nd=new Date(d); nd.setHours(0,0,0,0); return nd; }
+function escapeHtml(str){ return (str||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
-/* ---------------- text parser ---------------- */
+/* ---------------- 強化版文字解析引擎 (文本解析器) ---------------- */
 const WD_CHAR_MAP = {"一":1,"二":2,"三":3,"四":4,"五":5,"六":6,"日":0,"天":0,"末":0};
-const CN_DIGIT_MAP = {"零":0,"一":1,"二":2,"兩":2,"两":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9};
-const MAX_REPEAT_OCCURRENCES = 60; // 安全上限，避免無限展開
+const CN_DIGIT_MAP = {"零":0,"〇":0,"一":1,"二":2,"兩":2,"两":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9};
+const MAX_REPEAT_OCCURRENCES = 60;
 
 function cnNumToInt(s){
+  if(!s) return NaN;
   if(/^\d+$/.test(s)) return parseInt(s,10);
   if(s === "十") return 10;
   if(s.length === 1) return (s in CN_DIGIT_MAP) ? CN_DIGIT_MAP[s] : NaN;
@@ -742,9 +741,14 @@ function cnNumToInt(s){
   return NaN;
 }
 
-// 解析像「下午五點到六點」「晚上7點半到9點」這種中文時間段
-const CN_TIME_RANGE_RE = /(上午|中午|下午|晚上)?\s*([零一二三四五六七八九十兩两\d]{1,3})[點点]\s*(半)?\s*(?:到|至|[-~])\s*(上午|中午|下午|晚上)?\s*([零一二三四五六七八九十兩两\d]{1,3})[點点]\s*(半)?/;
+const CN_TIME_RANGE_RE = /(上午|中午|下午|晚上)?\s*([零一二三四五六七八九十兩两\d]{1,3})[點点:：]\s*([半\d]{1,2})?\s*(?:到|至|[-~—–])\s*(上午|中午|下午|晚上)?\s*([零一二三四五六七八九十兩两\d]{1,3})[點点:：]\s*([半\d]{1,2})?/;
+
 function parseChineseTimeRange(line){
+  // 先嘗試標準時間格式 15:30-16:00
+  const stdMatch = line.match(/(\d{1,2})[:：](\d{2})\s*[-~—–至到]\s*(\d{1,2})[:：](\d{2})/);
+  if(stdMatch){
+    return [pad2(stdMatch[1])+":"+stdMatch[2], pad2(stdMatch[3])+":"+stdMatch[4]];
+  }
   const m = line.match(CN_TIME_RANGE_RE);
   if(!m) return null;
   const [, ampm1, h1, half1, ampm2, h2, half2] = m;
@@ -759,33 +763,17 @@ function parseChineseTimeRange(line){
   }
   hh1 = adjust(hh1, ap1);
   hh2 = adjust(hh2, ap2);
-  const mm1 = half1 ? "30" : "00";
-  const mm2 = half2 ? "30" : "00";
+  const mm1 = half1 === "半" ? "30" : (half1 ? pad2(half1) : "00");
+  const mm2 = half2 === "半" ? "30" : (half2 ? pad2(half2) : "00");
   return [pad2(hh1)+":"+mm1, pad2(hh2)+":"+mm2];
 }
 
-// 從一行文字中，把星期/重複/時間等已知片段拿掉，剩下的當作標題備援
-function extractInlineTitle(line){
-  let s = line;
-  s = s.replace(/每[週周]/g,"");
-  s = s.replace(/[週周]\s*[一二三四五六日天]/g,"");
-  s = s.replace(CN_TIME_RANGE_RE,"");
-  s = s.replace(/\d{1,2}:\d{2}\s*[-~至]\s*\d{1,2}:\d{2}/g,"");
-  s = s.replace(/(\d{2,3})\/(\d{1,2})\/(\d{1,2})/g,"");
-  s = s.replace(/(?<!\d)(\d{1,2})\/(\d{1,2})(?!\/)/g,"");
-  s = s.replace(/(\d{1,2})月(\d{1,2})日/g,"");
-  s = s.replace(/^[，,、\s]+|[，,、\s]+$/g,"");
-  return s.trim();
-}
-
-// 重複上限：不管從哪一天開始，重複最晚只能到「起始日期所在那一年」的12/31
-// （若那年12/31不是目標星期幾，weeklyDatesBetween 本來就會自然停在那年最後一次符合的星期幾，不需要額外處理）
 function maxRepeatUntil(fromIso){
   const base = fromIso || isoOf(stripTime(new Date()));
   const year = base.slice(0,4);
   return year + "-12-31";
 }
-// 依「每週」展開日期清單，含安全上限
+
 function weeklyDatesBetween(startIso, endIso){
   const start = new Date(startIso+"T00:00:00");
   const end = new Date(endIso+"T00:00:00");
@@ -800,438 +788,459 @@ function weeklyDatesBetween(startIso, endIso){
   return out;
 }
 
+// 主解析邏輯：全方位解析日期與訊息
 function parseScheduleText(text){
   const today = stripTime(new Date());
-  const nextWeekFlag = /下週|下周/.test(text);
-  const monThis = startOfWeekMon(today);
-  const monNext = addDays(monThis,7);
+  const curYear = today.getFullYear();
+  const rows = [];
 
+  // 1. 全域尋找時間 (例: 15:30-16:00)
+  let globalTime = ["", ""];
+  const tRes = parseChineseTimeRange(text);
+  if(tRes) globalTime = tRes;
+
+  // 2. 提取全域學生或發言者姓名（例如：B4. Amelia）
+  let globalName = "";
+  const nameMatch = text.match(/([A-Z0-9]{1,4}\.\s*[\u4e00-\u9fa5a-zA-Z0-9_]+)/i);
+  if(nameMatch) globalName = nameMatch[1].trim();
+
+  // 3. 將內文拆成各行進行標籤與日期匹配
   const lines = text.split(/\n/).map(l=>l.trim()).filter(Boolean);
 
-  let title = "";
   for(const line of lines){
-    if(/以上|可以在|可到|可上/.test(line)){
-      let m = line.match(/(?:可以在|可到|可上)([^\n]+)/);
-      let cap = m ? m[1] : line.replace(/以上.*?[，,]?/,"");
-      cap = cap.replace(/[～~。！!\s]+$/g,"");
-      cap = cap.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,"").trim();
-      if(cap){ title = cap; break; }
+    // 檢查是否有特定的動作欄位標題 (如：請假、補考課、上課、觀課等)
+    let actionTitle = "";
+    if(/請假/.test(line)) actionTitle = "請假";
+    else if(/補考|補課/.test(line)) actionTitle = "補考課";
+    else if(/觀課/.test(line)) actionTitle = "觀課";
+    else if(/上課/.test(line)) actionTitle = "上課";
+
+    // 自訂組合標題
+    let title = actionTitle;
+    if(globalName){
+      title = title ? `${globalName} - ${title}` : globalName;
+    }
+
+    // A. 抓取這行裡面的所有日期區塊（支援 西元, 民國, M/D, 國字數字, 連續頓點日期）
+    // 比對範例：115/08/13、2026/08/13、8/13、8/13、8/17、八月十三日
+    const datePattern = /((?:(?:\d{2,4}|[零一二三四五六七八九十]+)[年\/-])?(?:1[0-2]|0?[1-9]|[一二三四五六七八九十]+)[月\/-](?:3[01]|[12]\d|0?[1-9]|[一二三四五六七八九十]+)[日号]?)/g;
+    
+    // 找出所有符合日期的子片段
+    const dateMatches = line.match(datePattern);
+
+    if(dateMatches && dateMatches.length > 0){
+      // 檢查此行是否有單獨時間設定
+      const lineTime = parseChineseTimeRange(line) || globalTime;
+
+      for(const rawDateStr of dateMatches){
+        let y = curYear, m, d;
+        
+        // 處理格式
+        const cleanStr = rawDateStr.replace(/[日号]/g, "");
+        const parts = cleanStr.split(/[\/年\-月]/).filter(Boolean);
+
+        if(parts.length === 3){ // 有年、月、日
+          let parsedY = cnNumToInt(parts[0]);
+          if(parsedY < 1000) parsedY += 1911; // 民國年轉西元年 (115 -> 2026)
+          y = parsedY;
+          m = cnNumToInt(parts[1]);
+          d = cnNumToInt(parts[2]);
+        } else if(parts.length === 2){ // 只有 月、日
+          m = cnNumToInt(parts[1] ? parts[0] : parts[0]);
+          d = cnNumToInt(parts[1]);
+        }
+
+        if(!isNaN(m) && !isNaN(d)){
+          const isoDate = `${y}-${pad2(m)}-${pad2(d)}`;
+          rows.push({
+            date: isoDate,
+            start: lineTime[0],
+            end: lineTime[1],
+            title: title || "新行程",
+            repeat: false,
+            repeatUntil: maxRepeatUntil(isoDate)
+          });
+        }
+      }
+    } else {
+      // B. 處理「每週三」、「週五」等週期型文字
+      const weekPattern = /(每[週周]|下[週周]|[週周])\s*([一二三四五六日天])/g;
+      let wMatch;
+      while((wMatch = weekPattern.exec(line)) !== null){
+        const prefix = wMatch[1];
+        const targetWd = WD_CHAR_MAP[wMatch[2]];
+        const isRepeat = prefix.startsWith("每");
+        const isNext = prefix.startsWith("下");
+
+        const monThis = startOfWeekMon(today);
+        const monBase = isNext ? addDays(monThis,7) : monThis;
+        
+        let targetDate = addDays(monBase, targetWd === 0 ? 6 : targetWd - 1);
+        if(!isNext && !isRepeat && targetDate < today){
+          targetDate = addDays(targetDate, 7);
+        }
+
+        const isoDate = isoOf(targetDate);
+        const lineTime = parseChineseTimeRange(line) || globalTime;
+
+        rows.push({
+          date: isoDate,
+          start: lineTime[0],
+          end: lineTime[1],
+          title: title || line.replace(/每[週周][一二三四五六日天]/g,"").trim() || "每週課程",
+          repeat: isRepeat,
+          repeatUntil: maxRepeatUntil(isoDate)
+        });
+      }
     }
   }
 
-  const rows = [];
-  const timeRe = /(\d{1,2}:\d{2})\s*[-~至]\s*(\d{1,2}:\d{2})/g;
-  const explicitRocRe = /(\d{2,3})\/(\d{1,2})\/(\d{1,2})/;
-  const explicitMdRe = /(?<!\d)(\d{1,2})\/(\d{1,2})(?!\/)/;
-  const explicitCnRe = /(\d{1,2})月(\d{1,2})日/;
-
-  for(const line of lines){
-    if(/其它|其他|卡到|不行|無法/.test(line) && !/[週周][一二三四五六日天]/.test(line)) continue;
-
-    const wdMatch = line.match(/[週周]\s*([一二三四五六日天])/);
-    if(!wdMatch) continue;
-    const targetWd = WD_CHAR_MAP[wdMatch[1]];
-    const isRecurring = /每[週周]/.test(line);
-
-    let dateObj = null;
-    let mRoc = line.match(explicitRocRe);
-    let mMd = line.match(explicitMdRe);
-    let mCn = line.match(explicitCnRe);
-    if(mRoc){
-      const y = parseInt(mRoc[1],10) + 1911;
-      dateObj = new Date(y, parseInt(mRoc[2],10)-1, parseInt(mRoc[3],10));
-    } else if(mCn){
-      let y = today.getFullYear();
-      let cand = new Date(y, parseInt(mCn[1],10)-1, parseInt(mCn[2],10));
-      if(cand < today) cand = new Date(y+1, parseInt(mCn[1],10)-1, parseInt(mCn[2],10));
-      dateObj = cand;
-    } else if(mMd){
-      let y = today.getFullYear();
-      let cand = new Date(y, parseInt(mMd[1],10)-1, parseInt(mMd[2],10));
-      if(cand < today) cand = new Date(y+1, parseInt(mMd[1],10)-1, parseInt(mMd[2],10));
-      dateObj = cand;
-    } else {
-      const baseMon = nextWeekFlag ? monNext : monThis;
-      const offset = (targetWd===0) ? 6 : targetWd-1;
-      let cand = addDays(baseMon, offset);
-      if(!nextWeekFlag && cand < today){
-        cand = addDays(cand,7);
-      }
-      dateObj = cand;
-    }
-
-    const ranges = [];
-    let tm;
-    timeRe.lastIndex = 0;
-    while((tm = timeRe.exec(line)) !== null){
-      ranges.push([tm[1], tm[2]]);
-    }
-    if(ranges.length === 0){
-      const cnRange = parseChineseTimeRange(line);
-      if(cnRange) ranges.push(cnRange);
-    }
-
-    const lineTitle = title || extractInlineTitle(line);
-    const iso = isoOf(dateObj);
-    const repeatUntil = isRecurring ? maxRepeatUntil(iso) : "";
-
-    if(ranges.length === 0){
-      rows.push({date: iso, start:"", end:"", title: lineTitle, recurring: isRecurring, repeatUntil});
-    } else {
-      for(const r of ranges){
-        rows.push({date: iso, start:r[0], end:r[1], title: lineTitle, recurring: isRecurring, repeatUntil});
-      }
-    }
+  // 如果解析出來為空，給予一筆當天預設值供使用者修改
+  if(rows.length === 0){
+    rows.push({
+      date: isoOf(today),
+      start: globalTime[0] || "",
+      end: globalTime[1] || "",
+      title: globalName ? `${globalName} - 行程` : "新行程",
+      repeat: false,
+      repeatUntil: maxRepeatUntil(isoOf(today))
+    });
   }
+
   return rows;
 }
 
-/* ---------------- preview table ---------------- */
-const previewWrap = document.getElementById("previewWrap");
-const previewBody = document.getElementById("previewBody");
-
-function addPreviewRow(row){
-  row = Object.assign({date:isoOf(new Date()), start:"", end:"", title:"", recurring:false, repeatUntil:""}, row);
-  const tr = document.createElement("tr");
-  const untilDefault = row.repeatUntil || maxRepeatUntil(row.date);
-  const untilMax = maxRepeatUntil(row.date);
-  tr.innerHTML =
-    '<td><input type="date" class="p-date" value="'+row.date+'"><div class="p-wd-hint" style="font-size:10.5px;color:var(--accent-2);margin-top:2px;">'+wdLabelOf(row.date)+'</div></td>'+
-    '<td><input type="time" class="p-start" value="'+row.start+'"></td>'+
-    '<td><input type="time" class="p-end" value="'+row.end+'"></td>'+
-    '<td><input type="text" class="p-title" value="'+escapeHtml(row.title)+'"></td>'+
-    '<td><div class="rpt-wrap">'+
-      '<label><input type="checkbox" class="p-recurring"'+(row.recurring?' checked':'')+'> 每週</label>'+
-      '<input type="date" class="p-repeat-until" value="'+untilDefault+'" max="'+untilMax+'" '+(row.recurring?'':'disabled')+'>'+
-    '</div></td>'+
-    '<td><button class="rmv" title="刪除此列" aria-label="刪除此列">×</button></td>';
-  tr.querySelector(".rmv").addEventListener("click", ()=> tr.remove());
-  const recurringChk = tr.querySelector(".p-recurring");
-  const untilInput = tr.querySelector(".p-repeat-until");
-  const dateInput = tr.querySelector(".p-date");
-  const wdHint = tr.querySelector(".p-wd-hint");
-  recurringChk.addEventListener("change", ()=>{
-    untilInput.disabled = !recurringChk.checked;
-  });
-  dateInput.addEventListener("change", ()=>{
-    wdHint.textContent = wdLabelOf(dateInput.value);
-    const newMax = maxRepeatUntil(dateInput.value);
-    untilInput.max = newMax;
-    if(untilInput.value < dateInput.value || untilInput.value > newMax){
-      untilInput.value = newMax;
-    }
-  });
-  previewBody.appendChild(tr);
-}
-function wdLabelOf(iso){
-  if(!iso) return "";
-  return "週" + WD_LABEL[new Date(iso+"T00:00:00").getDay()];
-}
-function escapeHtml(s){
-  return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
-
-document.getElementById("parseBtn").addEventListener("click", function(){
-  const text = document.getElementById("pasteBox").value;
-  if(!text.trim()) return;
-  const rows = parseScheduleText(text);
-  previewBody.innerHTML = "";
-  if(rows.length===0){
-    addPreviewRow({date:isoOf(new Date()), start:"", end:"", title:""});
-  } else {
-    rows.forEach(addPreviewRow);
-  }
-  previewWrap.style.display = "block";
-});
-
-document.getElementById("addRowBtn").addEventListener("click", function(){
-  addPreviewRow({date:isoOf(new Date()), start:"", end:"", title:""});
-});
-
-document.getElementById("cancelPreviewBtn").addEventListener("click", function(){
-  previewWrap.style.display = "none";
-  previewBody.innerHTML = "";
-});
-
-document.getElementById("clearPasteBtn").addEventListener("click", function(){
-  document.getElementById("pasteBox").value = "";
-});
-
-document.getElementById("commitBtn").addEventListener("click", async function(){
-  if(!currentUser) return;
-  const trs = previewBody.querySelectorAll("tr");
-
-  // 先組出每一列要建立的日期清單，重複的部分先跳出總覽讓使用者確認星期幾與筆數對不對
-  const planned = [];
-  trs.forEach(tr=>{
-    const date = tr.querySelector(".p-date").value;
-    const start = tr.querySelector(".p-start").value;
-    const end = tr.querySelector(".p-end").value;
-    const title = tr.querySelector(".p-title").value.trim();
-    const recurring = tr.querySelector(".p-recurring").checked;
-    const repeatUntil = tr.querySelector(".p-repeat-until").value;
-    if(!date || !title) return;
-    const dates = (recurring && repeatUntil && repeatUntil >= date)
-      ? weeklyDatesBetween(date, repeatUntil)
-      : [date];
-    planned.push({date, start, end, title, recurring, dates});
-  });
-
-  const recurringPlans = planned.filter(p => p.recurring && p.dates.length > 1);
-  if(recurringPlans.length > 0){
-    const lines = recurringPlans.map(p=>{
-      const lastDate = p.dates[p.dates.length-1];
-      return "「"+p.title+"」每"+wdLabelOf(p.date)+"："+p.date+" ~ "+lastDate+"（共 "+p.dates.length+" 筆）";
-    });
-    const ok = confirm(
-      "以下行程會依「每週重複」建立多筆，請確認星期幾正確：\n\n"+
-      lines.join("\n")+
-      "\n\n星期幾都正確的話請按「確定」，要修改請按「取消」回去調整每一列的日期。"
-    );
-    if(!ok) return;
-  }
-
-  const jobs = [];
-  planned.forEach(p=>{
-    const seriesId = (p.recurring && p.dates.length > 1) ? (Date.now()+"-"+Math.random().toString(36).slice(2,7)) : null;
-    p.dates.forEach(d=>{
-      const id = Date.now()+"-"+Math.random().toString(36).slice(2,7)+"-"+d;
-      const payload = {date:d, start:p.start, end:p.end, title:p.title};
-      if(seriesId) payload.seriesId = seriesId;
-      jobs.push(setDoc(doc(db,"users",currentUser.uid,"events",id), payload));
-    });
-  });
-  await Promise.all(jobs);
-  previewWrap.style.display = "none";
-  previewBody.innerHTML = "";
-  document.getElementById("pasteBox").value = "";
-});
-
-/* ---------------- manual add ---------------- */
-const mRepeatChk = document.getElementById("mRepeat");
-const mRepeatUntilWrap = document.getElementById("mRepeatUntilWrap");
-const mRepeatUntilInput = document.getElementById("mRepeatUntil");
-const mDateInput = document.getElementById("mDate");
-const mDateWdHint = document.getElementById("mDateWdHint");
-
-function syncManualRepeatDefaults(){
-  const base = mDateInput.value || isoOf(stripTime(new Date()));
-  mDateWdHint.textContent = mDateInput.value ? ("（"+wdLabelOf(mDateInput.value)+"）") : "";
-  const max = maxRepeatUntil(base);
-  mRepeatUntilInput.max = max;
-  if(!mRepeatUntilInput.value || mRepeatUntilInput.value < base || mRepeatUntilInput.value > max){
-    mRepeatUntilInput.value = max;
-  }
-}
-mRepeatChk.addEventListener("change", ()=>{
-  mRepeatUntilWrap.style.display = mRepeatChk.checked ? "block" : "none";
-  if(mRepeatChk.checked) syncManualRepeatDefaults();
-});
-mDateInput.addEventListener("change", syncManualRepeatDefaults);
-
-document.getElementById("manualForm").addEventListener("submit", async function(e){
-  e.preventDefault();
-  if(!currentUser) return;
-  const date = mDateInput.value;
-  const start = document.getElementById("mStart").value;
-  const end = document.getElementById("mEnd").value;
-  const title = document.getElementById("mTitle").value.trim();
-  if(!date || !title) return;
-
-  const recurring = mRepeatChk.checked;
-  const repeatUntil = mRepeatUntilInput.value;
-  const dates = (recurring && repeatUntil && repeatUntil >= date)
-    ? weeklyDatesBetween(date, repeatUntil)
-    : [date];
-
-  // 每週重複前先跳出確認，讓使用者看清楚實際會建立的星期幾與筆數，避免日期打錯
-  if(recurring && dates.length > 1){
-    const wd = wdLabelOf(date);
-    const lastDate = dates[dates.length-1];
-    const ok = confirm(
-      "將建立「每"+wd+"」重複行程：\n"+
-      date+"（"+wd+"）到 "+lastDate+"（"+wdLabelOf(lastDate)+"），共 "+dates.length+" 筆。\n\n"+
-      "星期幾是否正確？確認請按「確定」，要修改日期請按「取消」。"
-    );
-    if(!ok) return;
-  }
-
-  const seriesId = recurring ? (Date.now()+"-"+Math.random().toString(36).slice(2,7)) : null;
-  const jobs = dates.map(d=>{
-    const id = Date.now()+"-"+Math.random().toString(36).slice(2,7)+"-"+d;
-    const payload = {date:d, start, end, title};
-    if(seriesId) payload.seriesId = seriesId;
-    return setDoc(doc(db,"users",currentUser.uid,"events",id), payload);
-  });
-  await Promise.all(jobs);
-
-  this.reset();
-  mDateInput.value = isoOf(stripTime(new Date()));
-  mRepeatUntilWrap.style.display = "none";
-  syncManualRepeatDefaults();
-});
-
-/* ---------------- calendar render ---------------- */
-let events = [];
+/* ---------------- Calendar & App State Logic ---------------- */
 let viewYear, viewMonth;
-const today0 = stripTime(new Date());
 
-function initView(){
-  viewYear = today0.getFullYear();
-  viewMonth = today0.getMonth();
-}
-initView();
-
-const calGrid = document.getElementById("calGrid");
-const monthLabel = document.getElementById("monthLabel");
-const monthSub = document.getElementById("monthSub");
-
-function eventsForIso(iso){
-  return events.filter(e=>e.date===iso).sort((a,b)=> (a.start||"").localeCompare(b.start||""));
+function initCalendar(){
+  const now = new Date();
+  viewYear = now.getFullYear();
+  viewMonth = now.getMonth();
+  renderCalendar();
 }
 
 function renderCalendar(){
-  calGrid.innerHTML = "";
-  const dowNames = ["一","二","三","四","五","六","日"];
-  dowNames.forEach(n=>{
-    const el = document.createElement("div");
-    el.className = "dow"; el.textContent = n;
-    calGrid.appendChild(el);
+  document.getElementById("monthLabel").textContent = `${viewYear}年 ${viewMonth+1}月`;
+  document.getElementById("monthSub").textContent = `民國${viewYear-1911}年${pad2(viewMonth+1)}月`;
+
+  const grid = document.getElementById("calGrid");
+  grid.innerHTML = "";
+
+  WD_LABEL.forEach(w=>{
+    const d = document.createElement("div");
+    d.className = "dow";
+    d.textContent = w;
+    grid.appendChild(d);
   });
 
-  const firstOfMonth = new Date(viewYear, viewMonth, 1);
-  const firstCell = startOfWeekMon(firstOfMonth);
-  const lastOfMonth = new Date(viewYear, viewMonth+1, 0);
-  const lastCell = startOfWeekMon(addDays(lastOfMonth, 6));
-  const gridEnd = addDays(lastCell,6);
+  const firstDay = new Date(viewYear, viewMonth, 1);
+  const startDow = firstDay.getDay(); // 0 is Sun
+  const padCount = startDow;
 
-  let cur = new Date(firstCell);
-  while(cur <= gridEnd){
-    const iso = isoOf(cur);
-    const inMonth = cur.getMonth() === viewMonth;
-    const cell = document.createElement("div");
-    cell.className = "day" + (inMonth?"":" pad") + (isoOf(cur)===isoOf(today0)?" today":"");
-    const num = document.createElement("div");
-    num.className = "num";
-    num.textContent = cur.getDate();
-    cell.appendChild(num);
-
-    const dayEvents = eventsForIso(iso);
-    if(dayEvents.length){
-      const itemsWrap = document.createElement("div");
-      itemsWrap.className = "items";
-      dayEvents.slice(0,3).forEach(ev=>{
-        const p = document.createElement("div");
-        p.className = "pill";
-        p.textContent = (ev.start? ev.start+" ":"") + ev.title;
-        itemsWrap.appendChild(p);
-      });
-      if(dayEvents.length>3){
-        const more = document.createElement("div");
-        more.className = "pill more";
-        more.textContent = "+"+(dayEvents.length-3)+" 筆";
-        itemsWrap.appendChild(more);
-      }
-      cell.appendChild(itemsWrap);
-    }
-
-    if(inMonth){
-      cell.addEventListener("click", ()=> openDayModal(iso));
-    }
-    calGrid.appendChild(cell);
-    cur = addDays(cur,1);
+  for(let i=0; i<padCount; i++){
+    const pad = document.createElement("div");
+    pad.className = "day pad";
+    grid.appendChild(pad);
   }
 
-  monthLabel.textContent = viewYear + "年 " + (viewMonth+1) + "月";
-  monthSub.textContent = "民國" + (viewYear-1911) + "年" + pad2(viewMonth+1) + "月";
+  const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
+  const todayStr = isoOf(stripTime(new Date()));
+
+  for(let day=1; day<=daysInMonth; day++){
+    const cellDateStr = `${viewYear}-${pad2(viewMonth+1)}-${pad2(day)}`;
+    const cell = document.createElement("div");
+    cell.className = "day" + (cellDateStr === todayStr ? " today" : "");
+
+    const numSpan = document.createElement("span");
+    numSpan.className = "num";
+    numSpan.textContent = day;
+    cell.appendChild(numSpan);
+
+    const itemsDiv = document.createElement("div");
+    itemsDiv.className = "items";
+
+    const dayEvs = events.filter(e => e.date === cellDateStr);
+    const maxShow = 3;
+    dayEvs.slice(0, maxShow).forEach(ev => {
+      const p = document.createElement("div");
+      p.className = "pill";
+      p.textContent = (ev.start ? ev.start + " " : "") + ev.title;
+      itemsDiv.appendChild(p);
+    });
+
+    if(dayEvs.length > maxShow){
+      const more = document.createElement("div");
+      more.className = "pill more";
+      more.textContent = `+${dayEvs.length - maxShow} 更多`;
+      itemsDiv.appendChild(more);
+    }
+
+    cell.appendChild(itemsDiv);
+    cell.addEventListener("click", () => openModal(cellDateStr));
+    grid.appendChild(cell);
+  }
 }
 
 document.getElementById("prevBtn").addEventListener("click", ()=>{
-  viewMonth--; if(viewMonth<0){viewMonth=11; viewYear--;}
+  viewMonth--;
+  if(viewMonth < 0){ viewMonth = 11; viewYear--; }
   renderCalendar();
 });
 document.getElementById("nextBtn").addEventListener("click", ()=>{
-  viewMonth++; if(viewMonth>11){viewMonth=0; viewYear++;}
+  viewMonth++;
+  if(viewMonth > 11){ viewMonth = 0; viewYear++; }
   renderCalendar();
 });
 document.getElementById("todayBtn").addEventListener("click", ()=>{
-  initView(); renderCalendar();
+  initCalendar();
 });
 
-/* ---------------- day modal ---------------- */
+/* ---------------- Modal view ---------------- */
 const modalBg = document.getElementById("modalBg");
-const modalTitle = document.getElementById("modalTitle");
-const modalSub = document.getElementById("modalSub");
-const modalList = document.getElementById("modalList");
+function openModal(dateIso){
+  const d = new Date(dateIso+"T00:00:00");
+  document.getElementById("modalTitle").textContent = `${d.getMonth()+1}月${d.getDate()}日`;
+  document.getElementById("modalSub").textContent = `${rocOf(d)}（週${WD_LABEL[d.getDay()]}）`;
 
-function openDayModal(iso){
-  const d = new Date(iso+"T00:00:00");
-  modalTitle.textContent = (d.getMonth()+1)+"月"+d.getDate()+"日";
-  modalSub.textContent = rocOf(iso) + "（週"+WD_LABEL[d.getDay()]+"）";
-  renderModalList(iso);
-  modalBg.classList.add("open");
-  modalBg.dataset.iso = iso;
-}
-function renderModalList(iso){
-  const dayEvents = eventsForIso(iso);
-  modalList.innerHTML = "";
-  if(dayEvents.length===0){
-    const p = document.createElement("div");
-    p.className = "empty-note";
-    p.textContent = "這天還沒有排定的行程。";
-    modalList.appendChild(p);
-    return;
-  }
-  dayEvents.forEach(ev=>{
-    const row = document.createElement("div");
-    row.className = "ev-item";
-    const timeStr = (ev.start||ev.end) ? (ev.start+(ev.end? "–"+ev.end:"")) : "全天";
-    row.innerHTML =
-      '<div><div class="t">'+timeStr+'</div><div class="ti">'+escapeHtml(ev.title)+'</div></div>';
-    const delBtn = document.createElement("button");
-    delBtn.textContent = "刪除";
-    delBtn.addEventListener("click", async ()=>{
-      if(!currentUser) return;
-      await deleteDoc(doc(db,"users",currentUser.uid,"events",ev.id));
+  const list = document.getElementById("modalList");
+  list.innerHTML = "";
+
+  const dayEvs = events.filter(e => e.date === dateIso);
+  if(dayEvs.length === 0){
+    list.innerHTML = `<div class="empty-note">今天沒有行程</div>`;
+  } else {
+    dayEvs.forEach(ev => {
+      const item = document.createElement("div");
+      item.className = "ev-item";
+      const timeStr = (ev.start || ev.end) ? `${ev.start||""} ~ ${ev.end||""}` : "全天";
+      item.innerHTML = `
+        <div>
+          <div class="t">${timeStr}</div>
+          <div class="ti">${escapeHtml(ev.title)}</div>
+        </div>
+        <button data-id="${ev.id}">刪除</button>
+      `;
+      item.querySelector("button").addEventListener("click", async () => {
+        if(confirm("確定要刪除此行程？")){
+          await deleteDoc(doc(db, "users", currentUser.uid, "events", ev.id));
+          openModal(dateIso);
+        }
+      });
+      list.appendChild(item);
     });
-    row.appendChild(delBtn);
-    modalList.appendChild(row);
-  });
+  }
+  modalBg.classList.add("open");
 }
 document.getElementById("modalCloseBtn").addEventListener("click", ()=> modalBg.classList.remove("open"));
 modalBg.addEventListener("click", (e)=>{ if(e.target===modalBg) modalBg.classList.remove("open"); });
-document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") modalBg.classList.remove("open"); });
 
-document.getElementById("mDate").value = isoOf(today0);
-syncManualRepeatDefaults();
+/* ---------------- Text parsing preview ---------------- */
+let parsedRows = [];
+const pasteBox = document.getElementById("pasteBox");
+const previewWrap = document.getElementById("previewWrap");
+const previewBody = document.getElementById("previewBody");
 
-/* ---------------- auth state -> data subscription ---------------- */
-let currentUser = null;
+document.getElementById("parseBtn").addEventListener("click", ()=>{
+  const text = pasteBox.value.trim();
+  if(!text) return;
+  parsedRows = parseScheduleText(text);
+  renderPreview();
+});
+
+document.getElementById("clearPasteBtn").addEventListener("click", ()=>{
+  pasteBox.value = "";
+  previewWrap.style.display = "none";
+});
+
+function renderPreview(){
+  previewBody.innerHTML = "";
+  parsedRows.forEach((r, idx) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><input type="date" value="${r.date}" data-idx="${idx}" class="p-date"></td>
+      <td><input type="time" value="${r.start}" data-idx="${idx}" class="p-start"></td>
+      <td><input type="time" value="${r.end}" data-idx="${idx}" class="p-end"></td>
+      <td><input type="text" value="${escapeHtml(r.title)}" data-idx="${idx}" class="p-title"></td>
+      <td>
+        <div class="rpt-wrap">
+          <label><input type="checkbox" ${r.repeat?'checked':''} data-idx="${idx}" class="p-repeat">重複</label>
+          ${r.repeat ? `<input type="date" value="${r.repeatUntil}" data-idx="${idx}" class="p-until">` : ''}
+        </div>
+      </td>
+      <td><button class="rmv" data-idx="${idx}">×</button></td>
+    `;
+    previewBody.appendChild(tr);
+  });
+
+  previewWrap.style.display = "block";
+
+  // Bind live updates
+  previewBody.querySelectorAll("input").forEach(inp => {
+    inp.addEventListener("change", (e) => {
+      const i = e.target.dataset.idx;
+      if(e.target.classList.contains("p-date")) parsedRows[i].date = e.target.value;
+      if(e.target.classList.contains("p-start")) parsedRows[i].start = e.target.value;
+      if(e.target.classList.contains("p-end")) parsedRows[i].end = e.target.value;
+      if(e.target.classList.contains("p-title")) parsedRows[i].title = e.target.value;
+      if(e.target.classList.contains("p-repeat")){
+        parsedRows[i].repeat = e.target.checked;
+        renderPreview();
+      }
+      if(e.target.classList.contains("p-until")) parsedRows[i].repeatUntil = e.target.value;
+    });
+  });
+
+  previewBody.querySelectorAll(".rmv").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      const i = e.target.dataset.idx;
+      parsedRows.splice(i, 1);
+      renderPreview();
+    });
+  });
+}
+
+document.getElementById("addRowBtn").addEventListener("click", ()=>{
+  parsedRows.push({
+    date: isoOf(stripTime(new Date())),
+    start: "",
+    end: "",
+    title: "",
+    repeat: false,
+    repeatUntil: maxRepeatUntil(isoOf(stripTime(new Date())))
+  });
+  renderPreview();
+});
+
+document.getElementById("cancelPreviewBtn").addEventListener("click", ()=>{
+  previewWrap.style.display = "none";
+});
+
+document.getElementById("commitBtn").addEventListener("click", async ()=>{
+  if(!currentUser || parsedRows.length === 0) return;
+  const commitBtn = document.getElementById("commitBtn");
+  commitBtn.disabled = true;
+  commitBtn.textContent = "加入中...";
+
+  try {
+    const jobs = [];
+    for(const r of parsedRows){
+      if(r.repeat){
+        const dates = weeklyDatesBetween(r.date, r.repeatUntil);
+        dates.forEach(dStr => {
+          const newDocRef = doc(collection(db, "users", currentUser.uid, "events"));
+          jobs.push(setDoc(newDocRef, {
+            date: dStr,
+            start: r.start,
+            end: r.end,
+            title: r.title,
+            createdAt: new Date().toISOString()
+          }));
+        });
+      } else {
+        const newDocRef = doc(collection(db, "users", currentUser.uid, "events"));
+        jobs.push(setDoc(newDocRef, {
+          date: r.date,
+          start: r.start,
+          end: r.end,
+          title: r.title,
+          createdAt: new Date().toISOString()
+        }));
+      }
+    }
+    await Promise.all(jobs);
+    pasteBox.value = "";
+    previewWrap.style.display = "none";
+  } catch(err) {
+    alert("儲存失敗：" + err.message);
+  } finally {
+    commitBtn.disabled = false;
+    commitBtn.textContent = "加入行事曆";
+  }
+});
+
+/* ---------------- Manual form adding ---------------- */
+const manualForm = document.getElementById("manualForm");
+const mDate = document.getElementById("mDate");
+const mStart = document.getElementById("mStart");
+const mEnd = document.getElementById("mEnd");
+const mTitle = document.getElementById("mTitle");
+const mRepeat = document.getElementById("mRepeat");
+const mRepeatUntil = document.getElementById("mRepeatUntil");
+const mRepeatUntilWrap = document.getElementById("mRepeatUntilWrap");
+
+mDate.value = isoOf(stripTime(new Date()));
+mRepeat.addEventListener("change", ()=>{
+  mRepeatUntilWrap.style.display = mRepeat.checked ? "block" : "none";
+  if(mRepeat.checked) mRepeatUntil.value = maxRepeatUntil(mDate.value);
+});
+
+manualForm.addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  if(!currentUser) return;
+
+  const dateVal = mDate.value;
+  const startVal = mStart.value;
+  const endVal = mEnd.value;
+  const titleVal = mTitle.value.trim();
+  const isRepeat = mRepeat.checked;
+  const untilVal = mRepeatUntil.value;
+
+  const jobs = [];
+  if(isRepeat && untilVal){
+    const dates = weeklyDatesBetween(dateVal, untilVal);
+    dates.forEach(dStr => {
+      const newDocRef = doc(collection(db, "users", currentUser.uid, "events"));
+      jobs.push(setDoc(newDocRef, {
+        date: dStr,
+        start: startVal,
+        end: endVal,
+        title: titleVal,
+        createdAt: new Date().toISOString()
+      }));
+    });
+  } else {
+    const newDocRef = doc(collection(db, "users", currentUser.uid, "events"));
+    jobs.push(setDoc(newDocRef, {
+      date: dateVal,
+      start: startVal,
+      end: endVal,
+      title: titleVal,
+      createdAt: new Date().toISOString()
+    }));
+  }
+
+  await Promise.all(jobs);
+  mTitle.value = "";
+  mStart.value = "";
+  mEnd.value = "";
+  mRepeat.checked = false;
+  mRepeatUntilWrap.style.display = "none";
+});
+
+/* ---------------- Auth state Listener ---------------- */
 let unsubscribeEvents = null;
 
-onAuthStateChanged(auth, (user)=>{
+onAuthStateChanged(auth, (user) => {
   currentUser = user;
-  if(unsubscribeEvents){ unsubscribeEvents(); unsubscribeEvents = null; }
-
   if(user){
     authScreen.style.display = "none";
     appRoot.style.display = "block";
     userEmailLabel.textContent = user.email;
 
-    const colRef = collection(db,"users",user.uid,"events");
-    unsubscribeEvents = onSnapshot(colRef, (snap)=>{
-      events = snap.docs.map(d=> Object.assign({id:d.id}, d.data()));
+    initCalendar();
+
+    // 訂閱資料庫
+    const colRef = collection(db, "users", user.uid, "events");
+    unsubscribeEvents = onSnapshot(colRef, (snap) => {
+      events = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       renderCalendar();
-      if(modalBg.classList.contains("open")){
-        renderModalList(modalBg.dataset.iso);
-      }
-    }, (err)=>{
-      console.error("讀取資料失敗", err);
     });
   } else {
+    if(unsubscribeEvents) unsubscribeEvents();
+    events = [];
     authScreen.style.display = "block";
     appRoot.style.display = "none";
-    events = [];
   }
 });
 </script>
