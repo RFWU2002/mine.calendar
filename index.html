@@ -465,7 +465,7 @@ import {
   getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, getDocs
 } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
-// ------- 你的 Firebase 設定 -------
+// ------- Firebase 設定 -------
 const firebaseConfig = {
   apiKey: "AIzaSyCoSNHVGUfSLBKByjnxQUORCky7rgTQc08",
   authDomain: "my-schedule-cf7ff.firebaseapp.com",
@@ -493,7 +493,7 @@ const authSubmitBtn = document.getElementById("authSubmitBtn");
 const toRegister = document.getElementById("toRegister");
 const userEmailLabel = document.getElementById("userEmailLabel");
 
-let mode = "login"; // or "register"
+let mode = "login"; 
 toRegister.addEventListener("click", ()=>{
   mode = (mode === "login") ? "register" : "login";
   authSubmitBtn.textContent = (mode === "login") ? "登入" : "註冊新帳號";
@@ -719,7 +719,7 @@ function addDays(d,n){ const nd=new Date(d); nd.setDate(nd.getDate()+n); return 
 function stripTime(d){ const nd=new Date(d); nd.setHours(0,0,0,0); return nd; }
 function escapeHtml(str){ return (str||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
-/* ---------------- 強化版文字解析引擎 (文本解析器) ---------------- */
+/* ---------------- 強化版文字解析引擎 ---------------- */
 const WD_CHAR_MAP = {"一":1,"二":2,"三":3,"四":4,"五":5,"六":6,"日":0,"天":0,"末":0};
 const CN_DIGIT_MAP = {"零":0,"〇":0,"一":1,"二":2,"兩":2,"两":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9};
 const MAX_REPEAT_OCCURRENCES = 60;
@@ -744,7 +744,6 @@ function cnNumToInt(s){
 const CN_TIME_RANGE_RE = /(上午|中午|下午|晚上)?\s*([零一二三四五六七八九十兩两\d]{1,3})[點点:：]\s*([半\d]{1,2})?\s*(?:到|至|[-~—–])\s*(上午|中午|下午|晚上)?\s*([零一二三四五六七八九十兩两\d]{1,3})[點点:：]\s*([半\d]{1,2})?/;
 
 function parseChineseTimeRange(line){
-  // 先嘗試標準時間格式 15:30-16:00
   const stdMatch = line.match(/(\d{1,2})[:：](\d{2})\s*[-~—–至到]\s*(\d{1,2})[:：](\d{2})/);
   if(stdMatch){
     return [pad2(stdMatch[1])+":"+stdMatch[2], pad2(stdMatch[3])+":"+stdMatch[4]];
@@ -788,40 +787,7 @@ function weeklyDatesBetween(startIso, endIso){
   return out;
 }
 
-// 主解析邏輯：全方位解析日期與訊息
-function parseScheduleText(text){
-  const today = stripTime(new Date());
-  const curYear = today.getFullYear();
-  const rows = [];
-
-  // 1. 全域尋找時間 (例: 15:30-16:00)
-  let globalTime = ["", ""];
-  const tRes = parseChineseTimeRange(text);
-  if(tRes) globalTime = tRes;
-
-  // 2. 提取全域學生或發言者姓名（例如：B4. Amelia）
-  let globalName = "";
-  const nameMatch = text.match(/([A-Z0-9]{1,4}\.\s*[\u4e00-\u9fa5a-zA-Z0-9_]+)/i);
-  if(nameMatch) globalName = nameMatch[1].trim();
-
-  // 3. 將內文拆成各行進行標籤與日期匹配
-  const lines = text.split(/\n/).map(l=>l.trim()).filter(Boolean);
-
-  for(const line of lines){
-    // 檢查是否有特定的動作欄位標題 (如：請假、補考課、上課、觀課等)
-    let actionTitle = "";
-    if(/請假/.test(line)) actionTitle = "請假";
-    else if(/補考|補課/.test(line)) actionTitle = "補考課";
-    else if(/觀課/.test(line)) actionTitle = "觀課";
-    else if(/上課/.test(line)) actionTitle = "上課";
-
-    // 自訂組合標題
-    let title = actionTitle;
-    if(globalName){
-      title = title ? `${globalName} - ${title}` : globalName;
-    }
-
-    // A. 抓取這行裡面的所有日期區塊（支援 西元, 民國, M/D, 國字數字, 連續頓點日期）
+  // A. 抓取這行裡面的所有日期區塊（支援 西元, 民國, M/D, 國字數字, 連續頓點日期）
     // 比對範例：115/08/13、2026/08/13、8/13、8/13、8/17、八月十三日
     const datePattern = /((?:(?:\d{2,4}|[零一二三四五六七八九十]+)[年\/-])?(?:1[0-2]|0?[1-9]|[一二三四五六七八九十]+)[月\/-](?:3[01]|[12]\d|0?[1-9]|[一二三四五六七八九十]+)[日号]?)/g;
     
@@ -846,7 +812,7 @@ function parseScheduleText(text){
           m = cnNumToInt(parts[1]);
           d = cnNumToInt(parts[2]);
         } else if(parts.length === 2){ // 只有 月、日
-          m = cnNumToInt(parts[1] ? parts[0] : parts[0]);
+          m = cnNumToInt(parts[0]);
           d = cnNumToInt(parts[1]);
         }
 
