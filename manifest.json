@@ -1,0 +1,8 @@
+{
+  "name": "課表行事曆",
+  "short_name": "課表",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f6f3ec",
+  "theme_color": "#2b3a3a"
+}
