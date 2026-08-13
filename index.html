@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>課表行事曆</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2b3a3a">
+<style>
+  :root{
+    --ink:#2b3a3a;
+    --paper:#f6f3ec;
+    --paper-line:#e3ddcc;
+    --accent:#7a6a4f;
+    --accent-2:#c96f4a;
+    --today:#4f6d64;
+    --muted:#8b8577;
+    --card:#ffffff;
+    --danger:#b3503f;
+    font-family: 'Noto Serif TC', 'Songti TC', 'PMingLiU', serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 27px, var(--paper-line) 28px);
+    opacity:.35;
+    pointer-events:none;
+    z-index:0;
+  }
+  .wrap{
+    position:relative; z-index:1;
+    max-width:920px;
+    margin:0 auto;
+    padding:28px 18px 80px;
+  }
+  header.top{
+    display:flex; align-items:baseline; justify-content:space-between;
+    border-bottom:2px solid var(--ink);
+    padding-bottom:10px;
+    margin-bottom:18px;
+    flex-wrap:wrap;
+    gap:8px;
+  }
+  header.top h1{
+    font-size:22px; letter-spacing:.12em; margin:0; font-weight:600;
+  }
+  header.top .roc{
+    font-family: 'Courier New', monospace;
+    font-size:13px; color:var(--muted); letter-spacing:.08em;
+  }
+
+  /* ---- Month nav + calendar ---- */
+  .cal-head{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:10px;
+  }
+  .cal-head .month-label{
+    font-size:19px; font-weight:600; letter-spacing:.06em;
+  }
+  .cal-head .month-sub{
+    font-family:'Courier New',monospace;
+    font-size:12px; color:var(--muted);
+  }
+  .nav-btns button{
+    background:none; border:1px solid var(--ink); color:var(--ink);
+    width:30px; height:30px; border-radius:50%;
+    font-size:15px; cursor:pointer; margin-left:6px;
+    transition:.15s;
+  }
+  .nav-btns button:hover{background:var(--ink); color:var(--paper);}
+  .nav-btns button:focus-visible{outline:2px solid var(--accent-2); outline-offset:2px;}
+
+  .grid{
+    display:grid; grid-template-columns:repeat(7,1fr);
+    border-top:1px solid var(--ink); border-left:1px solid var(--ink);
+    background:var(--card);
+  }
+  .dow{
+    text-align:center; font-size:12px; padding:6px 0;
+    border-right:1px solid var(--ink); border-bottom:1px solid var(--ink);
+    color:var(--muted); letter-spacing:.1em; background:#efe9db;
+  }
+  .day{
+    border-right:1px solid var(--ink); border-bottom:1px solid var(--ink);
+    min-height:76px; padding:5px 5px 3px;
+    position:relative; cursor:pointer;
+    transition:background .15s;
+  }
+  .day:hover{background:#f0ece0;}
+  .day.pad{background:repeating-linear-gradient(45deg,#efece2,#efece2 4px,#f6f3ec 4px,#f6f3ec 9px); cursor:default;}
+  .day .num{
+    font-size:13px; font-family:'Courier New',monospace; color:var(--muted);
+  }
+  .day.today{background:#eef1e9;}
+  .day.today .num{
+    color:#fff; background:var(--today);
+    display:inline-flex; align-items:center; justify-content:center;
+    width:20px; height:20px; border-radius:50%; font-weight:700;
+  }
+  .day .items{margin-top:4px; display:flex; flex-direction:column; gap:2px;}
+  .pill{
+    font-size:10.5px; background:#e9e1cc; border-left:2px solid var(--accent-2);
+    padding:1px 4px; border-radius:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .pill.more{background:none; border:none; color:var(--muted); padding-left:2px;}
+
+  /* ---- sections ---- */
+  section.block{
+    margin-top:34px;
+  }
+  section.block > h2{
+    font-size:14px; letter-spacing:.15em; color:var(--accent);
+    display:flex; align-items:center; gap:8px; margin-bottom:10px;
+  }
+  section.block > h2::before{content:"";width:14px;height:1px;background:var(--accent-2);display:inline-block;}
+
+  textarea#pasteBox{
+    width:100%; min-height:110px; resize:vertical;
+    background:var(--card); border:1px solid var(--ink);
+    padding:10px; font-size:14px; font-family:inherit; color:var(--ink);
+    line-height:1.6;
+  }
+  textarea#pasteBox:focus-visible, input:focus-visible, select:focus-visible{
+    outline:2px solid var(--accent-2); outline-offset:1px;
+  }
+  .row{display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; align-items:center;}
+  button.primary{
+    background:var(--ink); color:var(--paper); border:none;
+    padding:9px 18px; font-size:13px; letter-spacing:.08em; cursor:pointer;
+    font-family:inherit;
+  }
+  button.primary:hover{background:var(--accent-2);}
+  button.ghost{
+    background:none; color:var(--ink); border:1px solid var(--ink);
+    padding:8px 14px; font-size:12.5px; cursor:pointer; font-family:inherit;
+  }
+  button.ghost:hover{background:var(--ink); color:var(--paper);}
+  .hint{font-size:12px; color:var(--muted); margin-top:6px; line-height:1.6;}
+
+  table.preview{width:100%; border-collapse:collapse; margin-top:14px; font-size:13px;}
+  table.preview th{
+    text-align:left; font-weight:600; font-size:11.5px; color:var(--muted);
+    border-bottom:1px solid var(--ink); padding:5px 4px; letter-spacing:.05em;
+  }
+  table.preview td{border-bottom:1px solid var(--paper-line); padding:5px 4px; vertical-align:middle;}
+  table.preview input[type=text], table.preview input[type=date], table.preview input[type=time]{
+    width:100%; border:1px solid #ccc4ac; padding:4px 5px; font-size:12.5px; font-family:inherit; background:#fffdf8;
+  }
+  table.preview .rmv{cursor:pointer; color:var(--danger); font-size:16px; background:none; border:none;}
+
+  form.manual{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; align-items:end;
+  }
+  form.manual label{display:block; font-size:11px; color:var(--muted); margin-bottom:3px;}
+  form.manual input{
+    width:100%; border:1px solid var(--ink); padding:7px; font-family:inherit; font-size:13px; background:var(--card);
+  }
+
+  /* day detail modal */
+  .modal-bg{
+    position:fixed; inset:0; background:rgba(43,58,58,.45);
+    display:none; align-items:flex-end; justify-content:center; z-index:50;
+  }
+  .modal-bg.open{display:flex;}
+  @media(min-width:640px){ .modal-bg{align-items:center;} }
+  .modal{
+    background:var(--paper); width:100%; max-width:440px; max-height:85vh; overflow-y:auto;
+    border-top:2px solid var(--ink); padding:20px;
+  }
+  @media(min-width:640px){ .modal{border:2px solid var(--ink);} }
+  .modal h3{margin:0 0 4px; font-size:16px;}
+  .modal .roc-sub{font-family:'Courier New',monospace; font-size:12px; color:var(--muted); margin-bottom:14px;}
+  .ev-item{
+    background:var(--card); border-left:3px solid var(--accent-2);
+    padding:8px 10px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
+  }
+  .ev-item .t{font-size:12px; color:var(--muted); font-family:'Courier New',monospace;}
+  .ev-item .ti{font-size:13.5px; margin-top:2px;}
+  .ev-item button{background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px;}
+  .modal .close-row{text-align:right; margin-top:14px;}
+  .empty-note{color:var(--muted); font-size:13px;}
+
+  footer.note{
+    margin-top:50px; font-size:11.5px; color:var(--muted); text-align:center; line-height:1.8;
+    border-top:1px solid var(--paper-line); padding-top:14px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>課表行事曆</h1>
+    <div class="roc">不推播、不提醒 · 純紀錄</div>
+  </header>
+
+  <section class="block">
+    <div class="cal-head">
+      <div>
+        <div class="month-label" id="monthLabel">2026年 8月</div>
+        <div class="month-sub" id="monthSub">民國115年08月</div>
+      </div>
+      <div class="nav-btns">
+        <button id="prevBtn" aria-label="上個月">‹</button>
+        <button id="todayBtn" aria-label="回到今天" style="width:auto;border-radius:14px;padding:0 10px;font-size:12px;">今天</button>
+        <button id="nextBtn" aria-label="下個月">›</button>
+      </div>
+    </div>
+    <div class="grid" id="calGrid"></div>
+  </section>
+
+  <section class="block">
+    <h2>貼上訊息，自動解析建檔</h2>
+    <textarea id="pasteBox" placeholder="例如：
+好的！
+週三 14:30-15:30、16:30-18:00
+週五 14:30-15:30
+以上時段可以在翠屏校觀課BUZZ～
+其它時間會卡到一對一／團班"></textarea>
+    <div class="row">
+      <button class="primary" id="parseBtn">解析文字</button>
+      <button class="ghost" id="clearPasteBtn">清空</button>
+    </div>
+    <div class="hint">
+      規則：只寫「週三／週五」等星期幾 → 抓最近（含本週）的日期；文字中若出現「下週／下周」或明確日期（如 8/17、115/08/17）→ 從下週起算或直接採用該日期。解析後可在下方逐筆修改，確認無誤再加入行事曆。
+    </div>
+
+    <div id="previewWrap" style="display:none;">
+      <table class="preview" id="previewTable">
+        <thead>
+          <tr><th style="width:26%">日期(民國)</th><th style="width:15%">開始</th><th style="width:15%">結束</th><th>標題</th><th style="width:24px"></th></tr>
+        </thead>
+        <tbody id="previewBody"></tbody>
+      </table>
+      <div class="row">
+        <button class="primary" id="commitBtn">加入行事曆</button>
+        <button class="ghost" id="addRowBtn">+ 新增一列</button>
+        <button class="ghost" id="cancelPreviewBtn">取消</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <h2>手動新增單筆</h2>
+    <form class="manual" id="manualForm">
+      <div>
+        <label for="mDate">日期</label>
+        <input type="date" id="mDate" required>
+      </div>
+      <div>
+        <label for="mStart">開始時間</label>
+        <input type="time" id="mStart">
+      </div>
+      <div>
+        <label for="mEnd">結束時間</label>
+        <input type="time" id="mEnd">
+      </div>
+      <div style="grid-column:span 2;">
+        <label for="mTitle">標題</label>
+        <input type="text" id="mTitle" placeholder="例如：翠屏校觀課BUZZ" required>
+      </div>
+      <div>
+        <button class="primary" type="submit" style="width:100%;">新增</button>
+      </div>
+    </form>
+  </section>
+
+  <footer class="note">
+    資料只存在這台裝置的瀏覽器中（localStorage），沒有帳號、沒有雲端同步。<br>
+    想要桌面捷徑：直接把這個網址加到主畫面，或用瀏覽器書籤即可。
+  </footer>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h3 id="modalTitle">8月19日</h3>
+    <div class="roc-sub" id="modalSub">115/08/19（週三）</div>
+    <div id="modalList"></div>
+    <div class="close-row"><button class="ghost" id="modalCloseBtn">關閉</button></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------------- storage ---------------- */
+  const STORE_KEY = "schedule_events_v1";
+  function loadEvents(){
+    try{ return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }catch(e){ return []; }
+  }
+  function saveEvents(list){
+    localStorage.setItem(STORE_KEY, JSON.stringify(list));
+  }
+  let events = loadEvents();
+
+  /* ---------------- date helpers ---------------- */
+  const WD_LABEL = ["日","一","二","三","四","五","六"];
+  function pad2(n){ return String(n).padStart(2,"0"); }
+  function isoOf(d){ return d.getFullYear()+"-"+pad2(d.getMonth()+1)+"-"+pad2(d.getDate()); }
+  function rocOf(dOrIso){
+    const d = (typeof dOrIso === "string") ? new Date(dOrIso+"T00:00:00") : dOrIso;
+    return (d.getFullYear()-1911)+"/"+pad2(d.getMonth()+1)+"/"+pad2(d.getDate());
+  }
+  function startOfWeekMon(d){
+    const nd = new Date(d);
+    const day = nd.getDay(); // 0 Sun..6 Sat
+    const diff = (day===0? -6 : 1-day);
+    nd.setDate(nd.getDate()+diff);
+    nd.setHours(0,0,0,0);
+    return nd;
+  }
+  function addDays(d,n){ const nd=new Date(d); nd.setDate(nd.getDate()+n); return nd; }
+  function stripTime(d){ const nd=new Date(d); nd.setHours(0,0,0,0); return nd; }
+
+  /* ---------------- text parser ---------------- */
+  const WD_CHAR_MAP = {"一":1,"二":2,"三":3,"四":4,"五":5,"六":6,"日":0,"天":0,"末":0};
+
+  function parseScheduleText(text){
+    const today = stripTime(new Date());
+    const nextWeekFlag = /下週|下周/.test(text);
+    const monThis = startOfWeekMon(today);
+    const monNext = addDays(monThis,7);
+
+    const lines = text.split(/\n/).map(l=>l.trim()).filter(Boolean);
+
+    // find title/location line: prefer a line containing "以上" or "可以在"
+    let title = "";
+    for(const line of lines){
+      if(/以上|可以在|可到|可上/.test(line)){
+        let m = line.match(/(?:可以在|可到|可上)([^\n]+)/);
+        let cap = m ? m[1] : line.replace(/以上.*?[，,]?/,"");
+        cap = cap.replace(/[～~。！!\s]+$/g,"");
+        cap = cap.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,"").trim();
+        if(cap){ title = cap; break; }
+      }
+    }
+
+    const rows = [];
+    const timeRe = /(\d{1,2}:\d{2})\s*[-~至]\s*(\d{1,2}:\d{2})/g;
+    const explicitRocRe = /(\d{2,3})\/(\d{1,2})\/(\d{1,2})/; // 115/08/17
+    const explicitMdRe = /(?<!\d)(\d{1,2})\/(\d{1,2})(?!\/)/; // 8/17
+    const explicitCnRe = /(\d{1,2})月(\d{1,2})日/;
+
+    for(const line of lines){
+      // skip lines about other/busy time
+      if(/其它|其他|卡到|不行|無法/.test(line) && !/[週周][一二三四五六日天]/.test(line)) continue;
+
+      const wdMatch = line.match(/[週周]\s*([一二三四五六日天])/);
+      if(!wdMatch) continue;
+      const targetWd = WD_CHAR_MAP[wdMatch[1]];
+
+      // resolve date for this line
+      let dateObj = null;
+      let mRoc = line.match(explicitRocRe);
+      let mMd = line.match(explicitMdRe);
+      let mCn = line.match(explicitCnRe);
+      if(mRoc){
+        const y = parseInt(mRoc[1],10) + 1911;
+        dateObj = new Date(y, parseInt(mRoc[2],10)-1, parseInt(mRoc[3],10));
+      } else if(mCn){
+        let y = today.getFullYear();
+        let cand = new Date(y, parseInt(mCn[1],10)-1, parseInt(mCn[2],10));
+        if(cand < today) cand = new Date(y+1, parseInt(mCn[1],10)-1, parseInt(mCn[2],10));
+        dateObj = cand;
+      } else if(mMd){
+        let y = today.getFullYear();
+        let cand = new Date(y, parseInt(mMd[1],10)-1, parseInt(mMd[2],10));
+        if(cand < today) cand = new Date(y+1, parseInt(mMd[1],10)-1, parseInt(mMd[2],10));
+        dateObj = cand;
+      } else {
+        // weekday only -> nearest or next week
+        const baseMon = nextWeekFlag ? monNext : monThis;
+        const offset = (targetWd===0) ? 6 : targetWd-1; // Mon-based offset
+        let cand = addDays(baseMon, offset);
+        if(!nextWeekFlag && cand < today){
+          cand = addDays(cand,7);
+        }
+        dateObj = cand;
+      }
+
+      // find all time ranges on this line
+      const ranges = [];
+      let tm;
+      timeRe.lastIndex = 0;
+      while((tm = timeRe.exec(line)) !== null){
+        ranges.push([tm[1], tm[2]]);
+      }
+      if(ranges.length === 0){
+        rows.push({date: isoOf(dateObj), start:"", end:"", title: title || ""});
+      } else {
+        for(const r of ranges){
+          rows.push({date: isoOf(dateObj), start:r[0], end:r[1], title: title || ""});
+        }
+      }
+    }
+    return rows;
+  }
+
+  /* ---------------- preview table ---------------- */
+  const previewWrap = document.getElementById("previewWrap");
+  const previewBody = document.getElementById("previewBody");
+
+  function addPreviewRow(row){
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td><input type="date" class="p-date" value="'+row.date+'"></td>'+
+      '<td><input type="time" class="p-start" value="'+row.start+'"></td>'+
+      '<td><input type="time" class="p-end" value="'+row.end+'"></td>'+
+      '<td><input type="text" class="p-title" value="'+escapeHtml(row.title)+'"></td>'+
+      '<td><button class="rmv" title="刪除此列" aria-label="刪除此列">×</button></td>';
+    tr.querySelector(".rmv").addEventListener("click", ()=> tr.remove());
+    previewBody.appendChild(tr);
+  }
+  function escapeHtml(s){
+    return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  document.getElementById("parseBtn").addEventListener("click", function(){
+    const text = document.getElementById("pasteBox").value;
+    if(!text.trim()) return;
+    const rows = parseScheduleText(text);
+    previewBody.innerHTML = "";
+    if(rows.length===0){
+      addPreviewRow({date:isoOf(new Date()), start:"", end:"", title:""});
+    } else {
+      rows.forEach(addPreviewRow);
+    }
+    previewWrap.style.display = "block";
+  });
+
+  document.getElementById("addRowBtn").addEventListener("click", function(){
+    addPreviewRow({date:isoOf(new Date()), start:"", end:"", title:""});
+  });
+
+  document.getElementById("cancelPreviewBtn").addEventListener("click", function(){
+    previewWrap.style.display = "none";
+    previewBody.innerHTML = "";
+  });
+
+  document.getElementById("clearPasteBtn").addEventListener("click", function(){
+    document.getElementById("pasteBox").value = "";
+  });
+
+  document.getElementById("commitBtn").addEventListener("click", function(){
+    const trs = previewBody.querySelectorAll("tr");
+    trs.forEach(tr=>{
+      const date = tr.querySelector(".p-date").value;
+      const start = tr.querySelector(".p-start").value;
+      const end = tr.querySelector(".p-end").value;
+      const title = tr.querySelector(".p-title").value.trim();
+      if(!date || !title) return;
+      events.push({id: Date.now()+"-"+Math.random().toString(36).slice(2,7), date, start, end, title});
+    });
+    saveEvents(events);
+    previewWrap.style.display = "none";
+    previewBody.innerHTML = "";
+    document.getElementById("pasteBox").value = "";
+    renderCalendar();
+  });
+
+  /* ---------------- manual add ---------------- */
+  document.getElementById("manualForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    const date = document.getElementById("mDate").value;
+    const start = document.getElementById("mStart").value;
+    const end = document.getElementById("mEnd").value;
+    const title = document.getElementById("mTitle").value.trim();
+    if(!date || !title) return;
+    events.push({id: Date.now()+"-"+Math.random().toString(36).slice(2,7), date, start, end, title});
+    saveEvents(events);
+    this.reset();
+    renderCalendar();
+  });
+
+  /* ---------------- calendar render ---------------- */
+  let viewYear, viewMonth; // viewMonth 0-11
+  const today0 = stripTime(new Date());
+
+  function initView(){
+    viewYear = today0.getFullYear();
+    viewMonth = today0.getMonth();
+  }
+  initView();
+
+  const calGrid = document.getElementById("calGrid");
+  const monthLabel = document.getElementById("monthLabel");
+  const monthSub = document.getElementById("monthSub");
+
+  function eventsForIso(iso){
+    return events.filter(e=>e.date===iso).sort((a,b)=> (a.start||"").localeCompare(b.start||""));
+  }
+
+  function renderCalendar(){
+    calGrid.innerHTML = "";
+    const dowNames = ["一","二","三","四","五","六","日"];
+    dowNames.forEach(n=>{
+      const el = document.createElement("div");
+      el.className = "dow"; el.textContent = n;
+      calGrid.appendChild(el);
+    });
+
+    const firstOfMonth = new Date(viewYear, viewMonth, 1);
+    const firstCell = startOfWeekMon(firstOfMonth);
+    const lastOfMonth = new Date(viewYear, viewMonth+1, 0);
+    const lastCell = startOfWeekMon(addDays(lastOfMonth, 6));
+    // lastCell is Monday of the week containing lastOfMonth+6; we want end at that week's Sunday
+    const gridEnd = addDays(lastCell,6);
+
+    let cur = new Date(firstCell);
+    while(cur <= gridEnd){
+      const iso = isoOf(cur);
+      const inMonth = cur.getMonth() === viewMonth;
+      const cell = document.createElement("div");
+      cell.className = "day" + (inMonth?"":" pad") + (isoOf(cur)===isoOf(today0)?" today":"");
+      const num = document.createElement("div");
+      num.className = "num";
+      num.textContent = cur.getDate();
+      cell.appendChild(num);
+
+      const dayEvents = eventsForIso(iso);
+      if(dayEvents.length){
+        const itemsWrap = document.createElement("div");
+        itemsWrap.className = "items";
+        dayEvents.slice(0,3).forEach(ev=>{
+          const p = document.createElement("div");
+          p.className = "pill";
+          p.textContent = (ev.start? ev.start+" ":"") + ev.title;
+          itemsWrap.appendChild(p);
+        });
+        if(dayEvents.length>3){
+          const more = document.createElement("div");
+          more.className = "pill more";
+          more.textContent = "+"+(dayEvents.length-3)+" 筆";
+          itemsWrap.appendChild(more);
+        }
+        cell.appendChild(itemsWrap);
+      }
+
+      if(inMonth){
+        cell.addEventListener("click", ()=> openDayModal(iso));
+      }
+      calGrid.appendChild(cell);
+      cur = addDays(cur,1);
+    }
+
+    monthLabel.textContent = viewYear + "年 " + (viewMonth+1) + "月";
+    monthSub.textContent = "民國" + (viewYear-1911) + "年" + pad2(viewMonth+1) + "月";
+  }
+
+  document.getElementById("prevBtn").addEventListener("click", ()=>{
+    viewMonth--; if(viewMonth<0){viewMonth=11; viewYear--;}
+    renderCalendar();
+  });
+  document.getElementById("nextBtn").addEventListener("click", ()=>{
+    viewMonth++; if(viewMonth>11){viewMonth=0; viewYear++;}
+    renderCalendar();
+  });
+  document.getElementById("todayBtn").addEventListener("click", ()=>{
+    initView(); renderCalendar();
+  });
+
+  /* ---------------- day modal ---------------- */
+  const modalBg = document.getElementById("modalBg");
+  const modalTitle = document.getElementById("modalTitle");
+  const modalSub = document.getElementById("modalSub");
+  const modalList = document.getElementById("modalList");
+
+  function openDayModal(iso){
+    const d = new Date(iso+"T00:00:00");
+    modalTitle.textContent = (d.getMonth()+1)+"月"+d.getDate()+"日";
+    modalSub.textContent = rocOf(iso) + "（週"+WD_LABEL[d.getDay()]+"）";
+    renderModalList(iso);
+    modalBg.classList.add("open");
+    modalBg.dataset.iso = iso;
+  }
+  function renderModalList(iso){
+    const dayEvents = eventsForIso(iso);
+    modalList.innerHTML = "";
+    if(dayEvents.length===0){
+      const p = document.createElement("div");
+      p.className = "empty-note";
+      p.textContent = "這天還沒有排定的行程。";
+      modalList.appendChild(p);
+      return;
+    }
+    dayEvents.forEach(ev=>{
+      const row = document.createElement("div");
+      row.className = "ev-item";
+      const timeStr = (ev.start||ev.end) ? (ev.start+(ev.end? "–"+ev.end:"")) : "全天";
+      row.innerHTML =
+        '<div><div class="t">'+timeStr+'</div><div class="ti">'+escapeHtml(ev.title)+'</div></div>';
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "刪除";
+      delBtn.addEventListener("click", ()=>{
+        events = events.filter(e=>e.id!==ev.id);
+        saveEvents(events);
+        renderModalList(iso);
+        renderCalendar();
+      });
+      row.appendChild(delBtn);
+      modalList.appendChild(row);
+    });
+  }
+  document.getElementById("modalCloseBtn").addEventListener("click", ()=> modalBg.classList.remove("open"));
+  modalBg.addEventListener("click", (e)=>{ if(e.target===modalBg) modalBg.classList.remove("open"); });
+  document.addEventListener("keydown", (e)=>{ if(e.key==="Escape") modalBg.classList.remove("open"); });
+
+  /* ---------------- init ---------------- */
+  document.getElementById("mDate").value = isoOf(today0);
+  renderCalendar();
+
+})();
+</script>
+</body>
+</html>
