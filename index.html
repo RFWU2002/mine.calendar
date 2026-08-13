@@ -794,36 +794,50 @@ function weeklyDatesBetween(startIso, endIso){
   return out;
 }
 
-  // A. 抓取這行裡面的所有日期區塊（支援 西元, 民國, M/D, 國字數字, 連續頓點日期）
-    // 比對範例：115/08/13、2026/08/13、8/13、8/13、8/17、八月十三日
-    const datePattern = /((?:(?:\d{2,4}|[零一二三四五六七八九十]+)[年\/-])?(?:1[0-2]|0?[1-9]|[一二三四五六七八九十]+)[月\/-](?:3[01]|[12]\d|0?[1-9]|[一二三四五六七八九十]+)[日号]?)/g;
+function parseScheduleText(text) {
+  const rows = [];
+  const lines = text.split('\n');
+  const today = stripTime(new Date());
+  const curYear = today.getFullYear();
+
+  for (let rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const globalTime = parseChineseTimeRange(line) || ["", ""];
     
-    // 找出所有符合日期的子片段
+    // 清理字串取出標題候選
+    let title = line
+      .replace(/(\d{1,2})[:：](\d{2})\s*[-~—–至到]\s*(\d{1,2})[:：](\d{2})/g, "")
+      .replace(CN_TIME_RANGE_RE, "")
+      .replace(/((?:(?:\d{2,4}|[零一二三四五六七八九十]+)[年\/-])?(?:1[0-2]|0?[1-9]|[一二三四五六七八九十]+)[月\/-](?:3[01]|[12]\d|0?[1-9]|[一二三四五六七八九十]+)[日号]?)/g, "")
+      .replace(/(每[週周]|下[週周]|[週周])\s*([一二三四五六日天])/g, "")
+      .trim();
+
+    // A. 抓取這行裡面的所有日期區塊
+    const datePattern = /((?:(?:\d{2,4}|[零一二三四五六七八九十]+)[年\/-])?(?:1[0-2]|0?[1-9]|[一二三四五六七八九十]+)[月\/-](?:3[01]|[12]\d|0?[1-9]|[一二三四五六七八九十]+)[日号]?)/g;
     const dateMatches = line.match(datePattern);
 
-    if(dateMatches && dateMatches.length > 0){
-      // 檢查此行是否有單獨時間設定
+    if (dateMatches && dateMatches.length > 0) {
       const lineTime = parseChineseTimeRange(line) || globalTime;
 
-      for(const rawDateStr of dateMatches){
+      for (const rawDateStr of dateMatches) {
         let y = curYear, m, d;
-        
-        // 處理格式
         const cleanStr = rawDateStr.replace(/[日号]/g, "");
         const parts = cleanStr.split(/[\/年\-月]/).filter(Boolean);
 
-        if(parts.length === 3){ // 有年、月、日
+        if (parts.length === 3) {
           let parsedY = cnNumToInt(parts[0]);
-          if(parsedY < 1000) parsedY += 1911; // 民國年轉西元年 (115 -> 2026)
+          if (parsedY < 1000) parsedY += 1911;
           y = parsedY;
           m = cnNumToInt(parts[1]);
           d = cnNumToInt(parts[2]);
-        } else if(parts.length === 2){ // 只有 月、日
+        } else if (parts.length === 2) {
           m = cnNumToInt(parts[0]);
           d = cnNumToInt(parts[1]);
         }
 
-        if(!isNaN(m) && !isNaN(d)){
+        if (!isNaN(m) && !isNaN(d)) {
           const isoDate = `${y}-${pad2(m)}-${pad2(d)}`;
           rows.push({
             date: isoDate,
@@ -839,17 +853,17 @@ function weeklyDatesBetween(startIso, endIso){
       // B. 處理「每週三」、「週五」等週期型文字
       const weekPattern = /(每[週周]|下[週周]|[週周])\s*([一二三四五六日天])/g;
       let wMatch;
-      while((wMatch = weekPattern.exec(line)) !== null){
+      while ((wMatch = weekPattern.exec(line)) !== null) {
         const prefix = wMatch[1];
         const targetWd = WD_CHAR_MAP[wMatch[2]];
         const isRepeat = prefix.startsWith("每");
         const isNext = prefix.startsWith("下");
 
         const monThis = startOfWeekMon(today);
-        const monBase = isNext ? addDays(monThis,7) : monThis;
-        
+        const monBase = isNext ? addDays(monThis, 7) : monThis;
+
         let targetDate = addDays(monBase, targetWd === 0 ? 6 : targetWd - 1);
-        if(!isNext && !isRepeat && targetDate < today){
+        if (!isNext && !isRepeat && targetDate < today) {
           targetDate = addDays(targetDate, 7);
         }
 
@@ -860,7 +874,7 @@ function weeklyDatesBetween(startIso, endIso){
           date: isoDate,
           start: lineTime[0],
           end: lineTime[1],
-          title: title || line.replace(/每[週周][一二三四五六日天]/g,"").trim() || "每週課程",
+          title: title || "每週課程",
           repeat: isRepeat,
           repeatUntil: maxRepeatUntil(isoDate)
         });
@@ -868,13 +882,12 @@ function weeklyDatesBetween(startIso, endIso){
     }
   }
 
-  // 如果解析出來為空，給予一筆當天預設值供使用者修改
-  if(rows.length === 0){
+  if (rows.length === 0 && text.trim().length > 0) {
     rows.push({
       date: isoOf(today),
-      start: globalTime[0] || "",
-      end: globalTime[1] || "",
-      title: globalName ? `${globalName} - 行程` : "新行程",
+      start: "",
+      end: "",
+      title: "新行程",
       repeat: false,
       repeatUntil: maxRepeatUntil(isoOf(today))
     });
