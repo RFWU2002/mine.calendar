@@ -955,7 +955,12 @@ function renderCalendar(){
     const itemsDiv = document.createElement("div");
     itemsDiv.className = "items";
 
-    const dayEvs = events.filter(e => e.date === cellDateStr);
+  const dayEvs = events.filter(e => e.date === cellDateStr).sort((a, b) => {
+if (!a.start) return -1; // 全天行程排前
+if (!b.start) return 1;
+return a.start.localeCompare(b.start); // 時間早的排前
+});
+
     const maxShow = 3;
     dayEvs.slice(0, maxShow).forEach(ev => {
       const p = document.createElement("div");
@@ -1001,7 +1006,12 @@ function openModal(dateIso){
   const list = document.getElementById("modalList");
   list.innerHTML = "";
 
-  const dayEvs = events.filter(e => e.date === dateIso);
+  const dayEvs = events.filter(e => e.date === dateIso).sort((a, b) => {
+if (!a.start) return -1;
+if (!b.start) return 1;
+return a.start.localeCompare(b.start);
+});
+
   if(dayEvs.length === 0){
     list.innerHTML = `<div class="empty-note">今天沒有行程</div>`;
   } else {
