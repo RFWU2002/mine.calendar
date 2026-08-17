@@ -407,7 +407,7 @@
   <div class="modal" style="max-width:460px;">
     <h3>刪除將來行程</h3>
     <div class="warn">
-      這個動作無法復原：只會刪除下面你有勾選的行程，可以先用篩選縮小範圍，再逐筆勾選或取消。
+      這個動作無法復原：只會刪除下面有勾選的行程，可以先用篩選縮小範圍，再逐筆勾選或取消。
     </div>
     <label for="dfFromDate">從這天開始（含當天）</label>
     <input type="date" id="dfFromDate">
@@ -475,7 +475,7 @@ import {
   getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, getDocs
 } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
 
-// ------- Firebase 設定 -------
+// -------註 此區 Firebase 設定 -------
 const firebaseConfig = {
   apiKey: "AIzaSyCoSNHVGUfSLBKByjnxQUORCky7rgTQc08",
   authDomain: "my-schedule-cf7ff.firebaseapp.com",
@@ -507,7 +507,7 @@ let mode = "login";
 toRegister.addEventListener("click", ()=>{
   mode = (mode === "login") ? "register" : "login";
   authSubmitBtn.textContent = (mode === "login") ? "登入" : "註冊新帳號";
-  toRegister.textContent = (mode === "login") ? "建立一個新帳號" : "改成登入既有帳號";
+  toRegister.textContent = (mode === "login") ? "建立一個新帳號" : "已有帳號";
   authErr.textContent = "";
 });
 
@@ -544,7 +544,7 @@ document.getElementById("forgotPasswordLink").addEventListener("click", async ()
   }
   try{
     await sendPasswordResetEmail(auth, email);
-    authMsg.textContent = "已寄出重設密碼信到 " + email + "，請去信箱收信（含垃圾信匣）";
+    authMsg.textContent = "已寄出重設密碼信到 " + email + "，請至信箱收信（含垃圾信匣）";
   }catch(err){
     authErr.textContent = friendlyAuthError(err.code);
   }
@@ -729,7 +729,7 @@ function addDays(d,n){ const nd=new Date(d); nd.setDate(nd.getDate()+n); return 
 function stripTime(d){ const nd=new Date(d); nd.setHours(0,0,0,0); return nd; }
 function escapeHtml(str){ return (str||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
-/* ---------------- 強化版文字解析引擎 ---------------- */
+/* ---------------- 文字解析引擎 ---------------- */
 const WD_CHAR_MAP = {"一":1,"二":2,"三":3,"四":4,"五":5,"六":6,"日":0,"天":0,"末":0};
 const CN_DIGIT_MAP = {"零":0,"〇":0,"一":1,"二":2,"兩":2,"两":2,"三":3,"四":4,"五":5,"六":6,"七":7,"八":8,"九":9};
 const MAX_REPEAT_OCCURRENCES = 60;
@@ -797,13 +797,13 @@ function weeklyDatesBetween(startIso, endIso){
   return out;
 }
 
-/* ---- 新增emoji／符號清除，避免影響標題與日期判斷 ---- */
+/* ---- emoji／符號清除，避免影響標題與日期判斷 ---- */
 const EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{FE0F}\u{200D}]/gu;
 function stripEmoji(s){
   return (s||"").replace(EMOJI_RE, "").replace(/[ \t]+/g, " ");
 }
 
-/* ---- 新增公版訊息常見詞彙同義字，日後有需要再自行擴充 ---- */
+/* ---- 公版訊息常見詞彙同義字，日後有需要再自行擴充 ---- */
 const TITLE_SYNONYMS = {
   "補考課":"補課",
   "補課":"補課",
@@ -811,7 +811,7 @@ const TITLE_SYNONYMS = {
   "補班":"補課"
 };
 
-/* ---- 新增將單一日期字串（115/08/13、8/13、八月十三日...）轉成 ISO ---- */
+/* ---- 單一日期字串（115/08/13、8/13、八月十三日...）轉 ISO ---- */
 function parseOneDateToken(rawDateStr, curYear){
   const cleanStr = rawDateStr.replace(/[日号]/g, "");
   const parts = cleanStr.split(/[\/年\-月]/).filter(Boolean);
@@ -829,7 +829,7 @@ function parseOneDateToken(rawDateStr, curYear){
   return { iso: `${y}-${pad2(m)}-${pad2(d)}`, y, m };
 }
 
-/* ---- 新增：「8/13,17」這種同月份逗號簡寫（只有 , 或 ， 會觸發，、仍是原本的完整日期清單格式） ---- */
+/* ---- 「8/13,17」此類同月份逗號簡寫（只有 , 或 ， 會觸發，、仍是原本完整日期清單格式） ---- */
 const COMBO_DATE_RE = /((?:\d{2,4}[\/\-])?(?:1[0-2]|0?[1-9])[\/\-](?:3[01]|[12]\d|0?[1-9]))((?:\s*[,，]\s*(?:3[01]|[12]\d|0?[1-9])(?![\/\-\d]))+)/g;
 function extractComboDates(line, curYear){
   const dates = [];
@@ -851,13 +851,13 @@ function extractComboDates(line, curYear){
   return { dates, spans };
 }
 
-/* ---- 新增從「補考課日期：」此類欄位行擷取名稱 ---- */
+/* ---- 從「補考課日期：」此類欄位行擷取名稱 ---- */
 function extractDateFieldLabel(line){
   const m = line.match(/^([^\s：:]{1,12})日期/);
   return m ? m[1] : "";
 }
 
-/* ---- 新增從整段訊息裡找學生姓名／班級代碼（用於公版訊息標題） ---- */
+/* ---- 從整段訊息裡找學生姓名／班級代碼（用於公版訊息標題） ---- */
 function detectPersonAndClass(lines){
   const GREETING = /老師|您好|謝謝|感謝|協助|辛苦|不好意思|敬請|麻煩/;
   let personName = null, classCode = null;
@@ -881,7 +881,7 @@ function detectPersonAndClass(lines){
 const GENERIC_DATE_RE = /((?:(?:\d{2,4}|[零一二三四五六七八九十]+)[年\/-])?(?:1[0-2]|0?[1-9]|[一二三四五六七八九十]+)[月\/-](?:3[01]|[12]\d|0?[1-9]|[一二三四五六七八九十]+)[日号]?)/g;
 
 function parseScheduleText(text){
-  // 第一步：先把整段文字裡的 emoji／表情符號清乾淨，避免污染標題與日期判斷
+  // 整段文字裡的 emoji／表情符號清除，避免影響標題與日期判斷
   text = stripEmoji(text);
 
   const today = stripTime(new Date());
@@ -895,19 +895,19 @@ function parseScheduleText(text){
   const { personName: globalPersonName, classCode: globalClassCode } = detectPersonAndClass(rawLines);
 
   for(let line of rawLines){
-    // 請假日期不建檔，只有補課／上課等日期才要
+    // 請假日期不建檔，只判斷補課／上課等日期
     if(/請假/.test(line)) continue;
 
     // 去除開頭殘留的項目符號（emoji 已在上面清除，這裡處理 ASCII 符號）
     line = line.replace(/^[•\-\*\u2022]+\s*/,"").trim();
     if(!line) continue;
 
-    // A. 先偵測「8/13,17」這種同月份逗號簡寫
+    // A. 偵測「8/13,17」這類同月份逗號簡寫
     const combo = extractComboDates(line, curYear);
     let workLine = line;
     combo.spans.forEach(sp => { workLine = workLine.replace(sp, ""); });
 
-    // 再偵測其餘各式完整日期（西元/民國、M/D、國字、頓號清單等，原有邏輯不變）
+    // 偵測其餘各式完整日期（西元/民國、M/D、國字、頓號清單等，原有邏輯不變）
     const dateMatches = workLine.match(GENERIC_DATE_RE);
     const dateIsos = [...combo.dates];
     if(dateMatches){
@@ -1330,7 +1330,7 @@ onAuthStateChanged(auth, (user) => {
 
     initCalendar();
 
-    // 訂閱資料庫
+    // 資料庫
     const colRef = collection(db, "users", user.uid, "events");
     unsubscribeEvents = onSnapshot(colRef, (snap) => {
       events = snap.docs.map(d => ({ id: d.id, ...d.data() }));
