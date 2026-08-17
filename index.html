@@ -4,9 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>課表行事曆</title>
-<meta name="description" content="由AddilynWu製作，非企業級資安保證，請勿記錄敏感資料與高度隱私內容。免費，僅供親友方便記錄行程。後臺無記錄密碼，各帳戶間行程不流通。若有問題請聯繫LINE。">
+<meta name="description" content="程式碼架構、運行與代碼內說明由AddilynWu製作，帳戶驗證則連結GOOGLE-FIREBASE。當前為免費方案，非企業級資安保證。
+  提醒，請勿記錄敏感資料與高度隱私內容。免費版本目前提供親友記錄行程。後臺無記錄密碼，各帳戶間排程並不流通。若有意見回饋與問題，請聯繫LINE。">
 <meta property="og:title" content="課表行事曆">
-<meta property="og:description" content="由AddilynWu製作，非企業級資安保證，請勿記錄敏感資料與高度隱私內容。免費，僅供親友方便記錄行程。後臺無記錄密碼，各帳戶間行程不流通。若有問題請聯繫LINE。">
+<meta property="og:description" content="程式碼架構、運行與代碼內說明由AddilynWu製作，帳戶驗證則連結GOOGLE-FIREBASE。當前為免費方案，非企業級資安保證。
+  提醒，請勿記錄敏感資料與高度隱私內容。免費版本目前提供親友記錄行程。後臺無記錄密碼，各帳戶間排程並不流通。若有意見回饋與問題，請聯繫LINE。">
 <meta property="og:type" content="website">
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#2b3a3a">
@@ -327,6 +329,7 @@
 115年8月13日 談合約
 每週三 19:00 健身房
 下週五 10:00 開會
+或填入公版訊息。      
       ~注意~若未偵測成功將以「新行程」或「每週課程」代替!
       "></textarea>
     <div class="row">
@@ -794,109 +797,202 @@ function weeklyDatesBetween(startIso, endIso){
   return out;
 }
 
+/* ---- 新增emoji／符號清除，避免影響標題與日期判斷 ---- */
+const EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{FE0F}\u{200D}]/gu;
+function stripEmoji(s){
+  return (s||"").replace(EMOJI_RE, "").replace(/[ \t]+/g, " ");
+}
+
+/* ---- 新增公版訊息常見詞彙同義字，日後有需要再自行擴充 ---- */
+const TITLE_SYNONYMS = {
+  "補考課":"補課",
+  "補課":"補課",
+  "觀課":"觀課",
+  "補班":"補課"
+};
+
+/* ---- 新增將單一日期字串（115/08/13、8/13、八月十三日...）轉成 ISO ---- */
+function parseOneDateToken(rawDateStr, curYear){
+  const cleanStr = rawDateStr.replace(/[日号]/g, "");
+  const parts = cleanStr.split(/[\/年\-月]/).filter(Boolean);
+  let y, m, d;
+  if(parts.length === 3){
+    let parsedY = cnNumToInt(parts[0]);
+    if(parsedY < 1000) parsedY += 1911;
+    y = parsedY; m = cnNumToInt(parts[1]); d = cnNumToInt(parts[2]);
+  } else if(parts.length === 2){
+    y = curYear; m = cnNumToInt(parts[0]); d = cnNumToInt(parts[1]);
+  } else {
+    return null;
+  }
+  if(isNaN(m) || isNaN(d) || m<1 || m>12 || d<1 || d>31) return null;
+  return { iso: `${y}-${pad2(m)}-${pad2(d)}`, y, m };
+}
+
+/* ---- 新增：「8/13,17」這種同月份逗號簡寫（只有 , 或 ， 會觸發，、仍是原本的完整日期清單格式） ---- */
+const COMBO_DATE_RE = /((?:\d{2,4}[\/\-])?(?:1[0-2]|0?[1-9])[\/\-](?:3[01]|[12]\d|0?[1-9]))((?:\s*[,，]\s*(?:3[01]|[12]\d|0?[1-9])(?![\/\-\d]))+)/g;
+function extractComboDates(line, curYear){
+  const dates = [];
+  const spans = [];
+  let m;
+  COMBO_DATE_RE.lastIndex = 0;
+  while((m = COMBO_DATE_RE.exec(line)) !== null){
+    const base = parseOneDateToken(m[1], curYear);
+    if(!base) continue;
+    dates.push(base.iso);
+    m[2].split(/[,，]/).map(s=>s.trim()).filter(Boolean).forEach(dStr=>{
+      const dd = cnNumToInt(dStr);
+      if(!isNaN(dd) && dd>=1 && dd<=31){
+        dates.push(`${base.y}-${pad2(base.m)}-${pad2(dd)}`);
+      }
+    });
+    spans.push(m[0]);
+  }
+  return { dates, spans };
+}
+
+/* ---- 新增從「補考課日期：」此類欄位行擷取名稱 ---- */
+function extractDateFieldLabel(line){
+  const m = line.match(/^([^\s：:]{1,12})日期/);
+  return m ? m[1] : "";
+}
+
+/* ---- 新增從整段訊息裡找學生姓名／班級代碼（用於公版訊息標題） ---- */
+function detectPersonAndClass(lines){
+  const GREETING = /老師|您好|謝謝|感謝|協助|辛苦|不好意思|敬請|麻煩/;
+  let personName = null, classCode = null;
+  for(const raw of lines){
+    const line = raw.trim();
+    if(!line) continue;
+    if(GREETING.test(line)) continue;
+    if(/日期/.test(line)) continue;
+    if(/^[A-Za-z]{1,3}\d{1,3}$/.test(line)){
+      if(!classCode) classCode = line;
+      continue;
+    }
+    if(!personName && /^[A-Za-z][A-Za-z .]{1,19}$/.test(line)){
+      personName = line;
+      continue;
+    }
+  }
+  return { personName, classCode };
+}
+
+const GENERIC_DATE_RE = /((?:(?:\d{2,4}|[零一二三四五六七八九十]+)[年\/-])?(?:1[0-2]|0?[1-9]|[一二三四五六七八九十]+)[月\/-](?:3[01]|[12]\d|0?[1-9]|[一二三四五六七八九十]+)[日号]?)/g;
+
 function parseScheduleText(text){
+  // 第一步：先把整段文字裡的 emoji／表情符號清乾淨，避免污染標題與日期判斷
+  text = stripEmoji(text);
+
   const today = stripTime(new Date());
   const curYear = today.getFullYear();
-  const lines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
+  const rawLines = text.split(/\n+/).map(l => l.trim()).filter(Boolean);
   const rows = [];
   const globalTimeMatch = parseChineseTimeRange(text);
   const globalTime = globalTimeMatch || [null, null];
-  const globalName = null;
 
-  for(const line of lines){
-  // A. 抓取這行裡面的所有日期區塊（支援 西元, 民國, M/D, 國字數字, 連續頓點日期）
-    // 比對範例：115/08/13、2026/08/13、8/13、8/13、8/17、八月十三日
-    const datePattern = /((?:(?:\d{2,4}|[零一二三四五六七八九十]+)[年\/-])?(?:1[0-2]|0?[1-9]|[一二三四五六七八九十]+)[月\/-](?:3[01]|[12]\d|0?[1-9]|[一二三四五六七八九十]+)[日号]?)/g;
-    
-    // 找出所有符合日期的子片段
-    const dateMatches = line.match(datePattern);
+  // 從整段訊息找學生姓名／班級代碼（例如獨立一行的 "Jessie"、"B3"）
+  const { personName: globalPersonName, classCode: globalClassCode } = detectPersonAndClass(rawLines);
 
-    // 把日期／時間／星期字樣從這行文字中移除，剩下的當作標題
-    let title = line;
+  for(let line of rawLines){
+    // 請假日期不建檔，只有補課／上課等日期才要
+    if(/請假/.test(line)) continue;
+
+    // 去除開頭殘留的項目符號（emoji 已在上面清除，這裡處理 ASCII 符號）
+    line = line.replace(/^[•\-\*\u2022]+\s*/,"").trim();
+    if(!line) continue;
+
+    // A. 先偵測「8/13,17」這種同月份逗號簡寫
+    const combo = extractComboDates(line, curYear);
+    let workLine = line;
+    combo.spans.forEach(sp => { workLine = workLine.replace(sp, ""); });
+
+    // 再偵測其餘各式完整日期（西元/民國、M/D、國字、頓號清單等，原有邏輯不變）
+    const dateMatches = workLine.match(GENERIC_DATE_RE);
+    const dateIsos = [...combo.dates];
     if(dateMatches){
-      dateMatches.forEach(dm => { title = title.replace(dm, ""); });
+      dateMatches.forEach(dm=>{
+        const parsed = parseOneDateToken(dm, curYear);
+        if(parsed) dateIsos.push(parsed.iso);
+      });
     }
+
+    // 標題來源1：這行是不是「補考課日期：」這種欄位行？
+    const fieldLabel = extractDateFieldLabel(line);
+
+    // 標題來源2：把已知片段清掉後剩下的文字（原有邏輯，維持不變）
+    let title = line;
+    combo.spans.forEach(sp => { title = title.replace(sp, ""); });
+    if(dateMatches){ dateMatches.forEach(dm => { title = title.replace(dm, ""); }); }
     title = title
       .replace(/(\d{1,2})[:：](\d{2})\s*[-~—–至到]\s*(\d{1,2})[:：](\d{2})/g, "")
       .replace(CN_TIME_RANGE_RE, "")
       .replace(/(每[週周]|下[週周]|[週周])\s*([一二三四五六日天])/g, "")
-      .replace(/^[、，,\s]+|[、，,\s]+$/g, "")
+      .replace(/^[、，,：:\s]+|[、，,：:\s]+$/g, "")
       .trim();
 
-    if(dateMatches && dateMatches.length > 0){
-      // 檢查此行是否有單獨時間設定
+    if(dateIsos.length > 0){
       const lineTime = parseChineseTimeRange(line) || globalTime;
-
-      for(const rawDateStr of dateMatches){
-        let y = curYear, m, d;
-        
-        // 處理格式
-        const cleanStr = rawDateStr.replace(/[日号]/g, "");
-        const parts = cleanStr.split(/[\/年\-月]/).filter(Boolean);
-
-        if(parts.length === 3){ // 有年、月、日
-          let parsedY = cnNumToInt(parts[0]);
-          if(parsedY < 1000) parsedY += 1911; // 民國年轉西元年 (115 -> 2026)
-          y = parsedY;
-          m = cnNumToInt(parts[1]);
-          d = cnNumToInt(parts[2]);
-        } else if(parts.length === 2){ // 只有 月、日
-          m = cnNumToInt(parts[0]);
-          d = cnNumToInt(parts[1]);
-        }
-
-        if(!isNaN(m) && !isNaN(d)){
-          const isoDate = `${y}-${pad2(m)}-${pad2(d)}`;
-          rows.push({
-            date: isoDate,
-            start: lineTime[0],
-            end: lineTime[1],
-            title: title || "新行程",
-            repeat: false,
-            repeatUntil: maxRepeatUntil(isoDate)
-          });
-        }
+      let finalTitle;
+      if(fieldLabel){
+        // 公版訊息格式：姓名 + 班級代碼 + 欄位關鍵字（例如「Jessie B3補課」）
+        const normalized = TITLE_SYNONYMS[fieldLabel] || fieldLabel;
+        finalTitle = [globalPersonName, (globalClassCode||"") + normalized].filter(Boolean).join(" ").trim();
+        if(!finalTitle) finalTitle = title || "新行程";
+      } else {
+        finalTitle = title || "新行程";
       }
-    } else {
-      // B. 處理「每週三」、「週五」等週期型文字
-      const weekPattern = /(每[週周]|下[週周]|[週周])\s*([一二三四五六日天])/g;
-      let wMatch;
-      while((wMatch = weekPattern.exec(line)) !== null){
-        const prefix = wMatch[1];
-        const targetWd = WD_CHAR_MAP[wMatch[2]];
-        const isRepeat = prefix.startsWith("每");
-        const isNext = prefix.startsWith("下");
-
-        const monThis = startOfWeekMon(today);
-        const monBase = isNext ? addDays(monThis,7) : monThis;
-        
-        let targetDate = addDays(monBase, targetWd === 0 ? 6 : targetWd - 1);
-        if(!isNext && !isRepeat && targetDate < today){
-          targetDate = addDays(targetDate, 7);
-        }
-
-        const isoDate = isoOf(targetDate);
-        const lineTime = parseChineseTimeRange(line) || globalTime;
-
+      dateIsos.forEach(isoDate=>{
         rows.push({
           date: isoDate,
           start: lineTime[0],
           end: lineTime[1],
-          title: title || line.replace(/每[週周][一二三四五六日天]/g,"").trim() || "每週課程",
-          repeat: isRepeat,
+          title: finalTitle,
+          repeat: false,
           repeatUntil: maxRepeatUntil(isoDate)
         });
+      });
+      continue;
+    }
+
+    // B. 處理週期型文字，例如:「每週三」、「下週五」、「週五」...等（原有邏輯，維持不變，並修正標題保底文字）
+    const weekPattern = /(每[週周]|下[週周]|[週周])\s*([一二三四五六日天])/g;
+    let wMatch;
+    while((wMatch = weekPattern.exec(line)) !== null){
+      const prefix = wMatch[1];
+      const targetWd = WD_CHAR_MAP[wMatch[2]];
+      const isRepeat = prefix.startsWith("每");
+      const isNext = prefix.startsWith("下");
+
+      const monThis = startOfWeekMon(today);
+      const monBase = isNext ? addDays(monThis,7) : monThis;
+
+      let targetDate = addDays(monBase, targetWd === 0 ? 6 : targetWd - 1);
+      if(!isNext && !isRepeat && targetDate < today){
+        targetDate = addDays(targetDate, 7);
       }
+
+      const isoDate = isoOf(targetDate);
+      const lineTime = parseChineseTimeRange(line) || globalTime;
+
+      rows.push({
+        date: isoDate,
+        start: lineTime[0],
+        end: lineTime[1],
+        title: title || (isRepeat ? "每週課程" : "新行程"),
+        repeat: isRepeat,
+        repeatUntil: maxRepeatUntil(isoDate)
+      });
     }
   }
 
-  // 如果解析出來為空，給予一筆當天預設值供使用者修改
+  // 如果解析出來為空，則提供一筆當天預設值讓使用者修改
   if(rows.length === 0){
     rows.push({
       date: isoOf(today),
       start: globalTime[0] || "",
       end: globalTime[1] || "",
-      title: globalName ? `${globalName} - 行程` : "新行程",
+      title: "新行程",
       repeat: false,
       repeatUntil: maxRepeatUntil(isoOf(today))
     });
@@ -904,7 +1000,6 @@ function parseScheduleText(text){
 
   return rows;
 }
-
 /* ---------------- Calendar & App State Logic ---------------- */
 let viewYear, viewMonth;
 
