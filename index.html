@@ -986,7 +986,7 @@ function parseScheduleText(text){
     }
   }
 
-  // 如果解析出來為空，則提供一筆當天預設值讓使用者修改
+  // 如果解析出來沒東西就會提供一筆當天預設值讓使用者修改
   if(rows.length === 0){
     rows.push({
       date: isoOf(today),
