@@ -237,6 +237,12 @@
     background:none; border:none; color:var(--danger); font-size:11.5px;
     text-decoration:underline; cursor:pointer; font-family:inherit; margin-top:6px;
   }
+  
+  .footer-link{
+    background:none; border:none; color:var(--ink); font-size:11.5px;
+    text-decoration:underline; cursor:pointer; font-family:inherit; margin-top:6px;
+  }
+  
   #deleteModal .modal, #deleteFutureModal .modal{max-width:380px;}
   #deleteModal .warn, #deleteFutureModal .warn{
     font-size:12.5px; line-height:1.7; background:#f6e9e5; border-left:3px solid var(--danger);
@@ -396,7 +402,7 @@
   <footer class="note">
     行程資料存在雲端（Firebase），登入同一個帳號就能在不同裝置看到一樣的資料。<br>
     想要桌面捷徑：直接把這個網址加到主畫面，或用瀏覽器書籤即可。<br>
-    <button class="ghost" id="openStatsBtn" style="padding:4px 10px;font-size:11.5px;">查詢與時數統計</button>
+    <button class="footer-link" id="openStatsBtn">查詢與時數統計</button>
     
     <button class="danger-link" id="openDeleteFutureBtn">刪除將來行程</button>
     
