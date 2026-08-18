@@ -396,13 +396,42 @@
   <footer class="note">
     行程資料存在雲端（Firebase），登入同一個帳號就能在不同裝置看到一樣的資料。<br>
     想要桌面捷徑：直接把這個網址加到主畫面，或用瀏覽器書籤即可。<br>
+    <button class="ghost" id="openStatsBtn" style="padding:4px 10px;font-size:11.5px;">查詢與時數統計</button>
+    
     <button class="danger-link" id="openDeleteFutureBtn">刪除將來行程</button>
-    ・
+    
     <button class="danger-link" id="openDeleteModalBtn">刪除我的帳號</button>
   </footer>
 </div>
 </div>
-
+  
+<div class="modal-bg" id="statsModal">
+  <div class="modal" style="max-width:480px;">
+    <h3>查詢與時數統計</h3>
+    <label for="stFromDate">從（可留空＝不限）</label>
+    <input type="date" id="stFromDate">
+    <label for="stToDate">到（可留空＝不限）</label>
+    <input type="date" id="stToDate">
+    <label for="stKeyword">標題關鍵字（選填）</label>
+    <input type="text" id="stKeyword" placeholder="例如：Jessie 或 B3">
+    <label>星期篩選（選填，不勾代表不限）</label>
+    <div class="wd-filter" id="stWeekdayFilter">
+      <label><input type="checkbox" class="st-wd" value="1">一</label>
+      <label><input type="checkbox" class="st-wd" value="2">二</label>
+      <label><input type="checkbox" class="st-wd" value="3">三</label>
+      <label><input type="checkbox" class="st-wd" value="4">四</label>
+      <label><input type="checkbox" class="st-wd" value="5">五</label>
+      <label><input type="checkbox" class="st-wd" value="6">六</label>
+      <label><input type="checkbox" class="st-wd" value="0">日</label>
+    </div>
+    <div class="row" style="margin:10px 0 4px;">
+      <span class="hint" id="stSummary" style="margin:0;font-weight:600;color:var(--ink);"></span>
+    </div>
+    <div id="stEventList" style="max-height:280px;overflow-y:auto;margin-top:4px;"></div>
+    <div class="close-row"><button type="button" class="ghost" id="stCloseBtn">關閉</button></div>
+  </div>
+</div>
+  
 <div class="modal-bg" id="deleteFutureModal">
   <div class="modal" style="max-width:460px;">
     <h3>刪除將來行程</h3>
@@ -686,6 +715,88 @@ deleteFutureConfirmBtn.addEventListener("click", async ()=>{
   }
 });
 
+
+/* ---------------- 查詢與時數統計 ---------------- */
+function timeToMinutes(str){
+  if(!str) return null;
+  const m = str.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return null;
+  return parseInt(m[1],10)*60 + parseInt(m[2],10);
+}
+
+const statsModal = document.getElementById("statsModal");
+const stFromDate = document.getElementById("stFromDate");
+const stToDate = document.getElementById("stToDate");
+const stKeyword = document.getElementById("stKeyword");
+const stEventList = document.getElementById("stEventList");
+const stSummary = document.getElementById("stSummary");
+
+function getStatsFilteredEvents(){
+  const from = stFromDate.value;
+  const to = stToDate.value;
+  const keyword = stKeyword.value.trim();
+  const checkedWds = Array.from(document.querySelectorAll(".st-wd:checked")).map(el=>parseInt(el.value,10));
+  return events.filter(e=>{
+    if(from && e.date < from) return false;
+    if(to && e.date > to) return false;
+    if(keyword && !(e.title||"").includes(keyword)) return false;
+    if(checkedWds.length > 0){
+      const wd = new Date(e.date+"T00:00:00").getDay();
+      if(!checkedWds.includes(wd)) return false;
+    }
+    return true;
+  }).sort((a,b)=> a.date.localeCompare(b.date) || (a.start||"").localeCompare(b.start||""));
+}
+
+function renderStats(){
+  const matched = getStatsFilteredEvents();
+  stEventList.innerHTML = "";
+
+  let totalMinutes = 0;
+  let countedRows = 0;
+
+  if(matched.length === 0){
+    stEventList.innerHTML = `<div class="df-empty">沒有符合條件的行程</div>`;
+  } else {
+    matched.forEach(ev=>{
+      const d = new Date(ev.date+"T00:00:00");
+      const wdLabel = WD_LABEL[d.getDay()];
+      const timeStr = (ev.start||ev.end) ? (ev.start+(ev.end? "–"+ev.end:"")) : "全天";
+      const row = document.createElement("div");
+      row.className = "df-item";
+      row.innerHTML = `<div><div class="t">${ev.date}（週${wdLabel}）${timeStr}</div><div>${escapeHtml(ev.title)}</div></div>`;
+      stEventList.appendChild(row);
+
+      const sMin = timeToMinutes(ev.start);
+      const eMin = timeToMinutes(ev.end);
+      if(sMin !== null && eMin !== null && eMin > sMin){
+        totalMinutes += (eMin - sMin);
+        countedRows++;
+      }
+    });
+  }
+
+  const hrs = Math.floor(totalMinutes/60);
+  const mins = totalMinutes%60;
+  stSummary.textContent = `符合條件：${matched.length} 筆　｜　可計算時長的：${countedRows} 筆　｜　總時數：${hrs} 小時 ${mins} 分`;
+}
+
+document.getElementById("openStatsBtn").addEventListener("click", ()=>{
+  stFromDate.value = "";
+  stToDate.value = "";
+  stKeyword.value = "";
+  document.querySelectorAll(".st-wd").forEach(el=> el.checked = false);
+  renderStats();
+  statsModal.classList.add("open");
+});
+stFromDate.addEventListener("change", renderStats);
+stToDate.addEventListener("change", renderStats);
+stKeyword.addEventListener("input", renderStats);
+document.querySelectorAll(".st-wd").forEach(el=> el.addEventListener("change", renderStats));
+
+document.getElementById("stCloseBtn").addEventListener("click", ()=> statsModal.classList.remove("open"));
+statsModal.addEventListener("click", (e)=>{ if(e.target===statsModal) statsModal.classList.remove("open"); });
+  
 function friendlyDeleteError(code){
   const map = {
     "auth/wrong-password": "密碼不正確",
